@@ -56,7 +56,7 @@ export class DataStore extends EventTarget {
     }
 
     async _doLoad(symbol, resolution, params) {
-        const resp       = await this._http.getCandles({ symbol, resolution, count: 500, ...params });
+        const resp       = await this._http.getCandles({ symbol, resolution, count: params.count ?? 500, ...params });
         const newCandles = this._unpack(resp.candles);
         if (resp.live && newCandles.length) newCandles[newCandles.length - 1].live = true;
 

@@ -8,8 +8,9 @@ export class RigoView {
             wsBase:           options.wsBase           ?? `ws://${location.host}/api/charts/stream`,
             symbol:           options.symbol           ?? null,
             // Omit default so Chart can restore last resolution from storage.
-            resolution:       options.resolution,
-            onSymbolChange:   options.onSymbolChange   ?? null,
+            resolution:          options.resolution,
+            onSymbolChange:      options.onSymbolChange      ?? null,
+            barWidthPx:          options.barWidthPx          ?? null,
         });
     }
 

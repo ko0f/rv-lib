@@ -48,6 +48,7 @@ export class Chart {
         this._destroyed  = false;
         this._hoverPos   = null;
         this._hoverCandle = null;
+        this._barWidthPx = options.barWidthPx ?? null;
         /** Serializes left-history pagination so it runs without relying on wheel/pan. */
         this._backfillLeftRunning = false;
 
@@ -449,6 +450,10 @@ export class Chart {
         this._ws.subscribe(this._symbol, this._resolution);
         this._interaction.setContext(this._symbol, this._resolution);
         this._vp.adjustZoomForResolution(this._resolution);
+        if (this._barWidthPx) {
+            const candleMs = CANDLE_MS[this._resolution] ?? CANDLE_MS['1h'];
+            this._vp.msPerPixel = candleMs / this._barWidthPx;
+        }
         this._updateToolbar();
 
         try {
@@ -458,7 +463,16 @@ export class Chart {
         }
 
         try {
-            await this._ds.load(this._symbol, this._resolution);
+            const loadParams = this._barWidthPx
+                ? { count: Math.ceil((this._vp.width / this._barWidthPx) * 1.1) }
+                : {};
+            await this._ds.load(this._symbol, this._resolution, loadParams);
+            const candles = this._ds.getAll(this._symbol, this._resolution);
+            this._alignRightEdgeToLatest(candles, this._resolution);
+            const visible = this._visibleCandles();
+            if (visible.length) this._vp.fitToCandles(visible);
+            else if (candles.length) this._vp.fitToCandles(candles);
+            this.invalidate('static');
             await this._backfillLeftHistory();
         } catch (err) {
             console.error('[RigoView] Failed to load candles', err);
@@ -493,6 +507,10 @@ export class Chart {
         writeStoredResolution(resolution);
         this._updateToolbar();
         this._vp.adjustZoomForResolution(resolution);
+        if (this._barWidthPx) {
+            const candleMs = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
+            this._vp.msPerPixel = candleMs / this._barWidthPx;
+        }
 
         if (this._symbol) {
             this._ds.startBuffering(this._symbol, resolution);
