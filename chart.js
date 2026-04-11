@@ -1,0 +1,534 @@
+// chart.js — orchestrator: wires all modules, owns the RAF animation loop
+import { readTheme }    from './theme.js';
+import { HttpClient }   from './http-client.js';
+import { WsClient }     from './ws-client.js';
+import { DataStore }    from './data-store.js';
+import { Viewport }     from './viewport.js';
+import { Interaction, getLeftPrefetchParams } from './interaction.js';
+import { SymbolPicker } from './symbol-picker.js';
+import {
+    PRICE_AXIS_W, TIME_AXIS_H,
+    drawBackground, drawGrid, drawCandles, drawVolume, drawVolumeSeparator,
+    drawTimeAxis, drawPriceAxis, drawVolumeAxis, drawCrosshair, drawLiveIndicator, drawNoDataMarker,
+} from './renderer.js';
+
+const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
+const RESOLUTIONS = Object.keys(CANDLE_MS);
+const RESOLUTION_SET = new Set(RESOLUTIONS);
+const RESOLUTION_STORAGE_KEY = 'rigoview.resolution';
+
+function readStoredResolution() {
+    try {
+        const s = localStorage.getItem(RESOLUTION_STORAGE_KEY);
+        if (s && RESOLUTION_SET.has(s)) return s;
+    } catch (_) { /* private mode / quota */ }
+    return null;
+}
+
+function writeStoredResolution(resolution) {
+    try {
+        localStorage.setItem(RESOLUTION_STORAGE_KEY, resolution);
+    } catch (_) { /* private mode / quota */ }
+}
+
+function resolveInitialResolution(explicit) {
+    if (explicit && RESOLUTION_SET.has(explicit)) return explicit;
+    return readStoredResolution() ?? '1h';
+}
+
+const RIGHT_GUTTER_PX = 20;
+
+export class Chart {
+    constructor(container, options) {
+        this._container  = container;
+        this._options    = options;
+        this._symbol     = options.symbol     ?? null;
+        this._resolution = resolveInitialResolution(options.resolution);
+        this._meta       = null;
+        this._destroyed  = false;
+        this._hoverPos   = null;
+        this._hoverCandle = null;
+        /** Serializes left-history pagination so it runs without relying on wheel/pan. */
+        this._backfillLeftRunning = false;
+
+        // RAF dirty flags
+        this._staticDirty  = true;
+        this._overlayDirty = false;
+        this._rafScheduled = false;
+
+        this._buildDOM();
+        this._dpr = window.devicePixelRatio || 1;
+        this._resize();
+
+        this._theme = readTheme(container);
+        this._http  = new HttpClient(options.apiBase);
+        this._ws    = new WsClient(options.wsBase);
+        this._ds    = new DataStore(this._http);
+        this._vp    = new Viewport(this._chartW(), this._chartH());
+        this._updateLogBtnStyle();
+
+        this._interaction = new Interaction(this._overlayCanvas, this._vp, this._ds);
+        this._picker = new SymbolPicker(container, this._http, (id) => this.setSymbol(id));
+
+        this._wireEvents();
+
+        this._resizeObserver = new ResizeObserver(() => this._onResize());
+        this._resizeObserver.observe(this._canvasWrap);
+
+        this._updateToolbar();
+
+        if (this._symbol) this._load();
+        else this.invalidate('static'); // draw empty state
+    }
+
+    // ---- DOM setup ----
+
+    _buildDOM() {
+        this._container.style.cssText += ';position:relative;overflow:hidden';
+
+        // Toolbar
+        this._toolbar = document.createElement('div');
+        this._toolbar.style.cssText = [
+            'display:flex;align-items:center;gap:4px;flex-shrink:0',
+            'height:36px;padding:0 10px;box-sizing:border-box',
+            'background:var(--widget-bg-color,#141722)',
+            'border-bottom:1px solid var(--widget-border-color,#252836)',
+            'color:var(--text-color,#a0a8b8);font:13px monospace',
+        ].join(';');
+
+        this._symbolBtn = document.createElement('button');
+        this._symbolBtn.style.cssText = [
+            'background:rgba(255,255,255,0.08);border:none;border-radius:3px',
+            'color:var(--text-bright-color,#e0e8f0);font:600 13px monospace',
+            'padding:3px 10px;cursor:pointer;margin-right:8px;white-space:nowrap',
+        ].join(';');
+        this._symbolBtn.textContent = this._symbol ?? 'Select symbol';
+        this._symbolBtn.addEventListener('click', () => this._picker.open());
+        this._toolbar.appendChild(this._symbolBtn);
+
+        // Resolution buttons
+        this._resBtns = {};
+        for (const r of RESOLUTIONS) {
+            const btn = document.createElement('button');
+            btn.textContent = r;
+            btn.dataset.res = r;
+            btn.style.cssText = [
+                'background:none;border:none;border-radius:3px',
+                'padding:3px 8px;cursor:pointer;font:12px monospace',
+                'color:var(--text-dim-color,#505870)',
+            ].join(';');
+            btn.addEventListener('click', () => this.setResolution(r));
+            this._resBtns[r] = btn;
+            this._toolbar.appendChild(btn);
+        }
+
+        // Canvas wrapper — takes remaining height
+        this._canvasWrap = document.createElement('div');
+        this._canvasWrap.style.cssText = 'position:relative;flex:1;min-height:0;overflow:hidden';
+
+        this._staticCanvas  = document.createElement('canvas');
+        this._overlayCanvas = document.createElement('canvas');
+        for (const c of [this._staticCanvas, this._overlayCanvas]) {
+            c.style.cssText = 'position:absolute;top:0;left:0;display:block';
+        }
+        this._overlayCanvas.style.cursor = 'crosshair';
+
+        this._canvasWrap.appendChild(this._staticCanvas);
+        this._canvasWrap.appendChild(this._overlayCanvas);
+
+        this._logBtn = document.createElement('button');
+        this._logBtn.type = 'button';
+        this._logBtn.textContent = 'LOG';
+        this._logBtn.title = 'Toggle logarithmic price scale';
+        this._logBtn.style.cssText = [
+            'position:absolute',
+            'right:0',
+            'bottom:0',
+            `width:${PRICE_AXIS_W}px`,
+            `height:${TIME_AXIS_H}px`,
+            'padding:0',
+            'margin:0',
+            'box-sizing:border-box',
+            'border:none',
+            'border-left:1px solid var(--widget-border-color,#252836)',
+            'display:flex',
+            'align-items:center',
+            'justify-content:center',
+            'background:transparent',
+            'color:var(--text-dim-color,#505870)',
+            'font:600 10px monospace',
+            'letter-spacing:0.04em',
+            'cursor:pointer',
+            'z-index:2',
+        ].join(';');
+        this._logBtn.addEventListener('click', () => this._toggleLogScale());
+        this._canvasWrap.appendChild(this._logBtn);
+
+        const wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;flex-direction:column;width:100%;height:100%';
+        wrapper.appendChild(this._toolbar);
+        wrapper.appendChild(this._canvasWrap);
+        this._container.appendChild(wrapper);
+    }
+
+    _chartW() { return Math.max(1, this._canvasWrap.clientWidth  - PRICE_AXIS_W); }
+    _chartH() { return Math.max(1, this._canvasWrap.clientHeight - TIME_AXIS_H);  }
+
+    _toggleLogScale() {
+        this._vp.priceLogScale = !this._vp.priceLogScale;
+        this._vp.priceLocked = false;
+        const candles = this._visibleCandles();
+        if (candles.length) this._vp.fitToCandles(candles);
+        this._updateLogBtnStyle();
+        this.invalidate('static');
+    }
+
+    _updateLogBtnStyle() {
+        const on = this._vp.priceLogScale;
+        this._logBtn.style.color = on ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
+        this._logBtn.style.background = on ? 'rgba(255,255,255,0.14)' : 'transparent';
+    }
+
+    _resize() {
+        const dpr = this._dpr;
+        const w   = Math.max(1, this._canvasWrap.clientWidth);
+        const h   = Math.max(1, this._canvasWrap.clientHeight);
+        for (const canvas of [this._staticCanvas, this._overlayCanvas]) {
+            canvas.width        = w * dpr;
+            canvas.height       = h * dpr;
+            canvas.style.width  = w + 'px';
+            canvas.style.height = h + 'px';
+        }
+    }
+
+    _onResize() {
+        if (this._destroyed) return;
+        this._resize();
+        this._vp.resize(this._chartW(), this._chartH());
+        const candles = this._visibleCandles();
+        if (candles.length) this._vp.fitToCandles(candles);
+        this.invalidate('static');
+        void this._backfillLeftHistory();
+    }
+
+    // ---- Event wiring ----
+
+    _wireEvents() {
+        this._vp.on('viewport:changed', () => {
+            if (this._symbol) {
+                const candles = this._visibleCandles();
+                if (candles.length) this._vp.fitToCandles(candles);
+            }
+            this.invalidate('static');
+        });
+
+        this._ds.addEventListener('data:loaded', (e) => {
+            const { symbol, resolution } = e.detail;
+            if (symbol !== this._symbol || resolution !== this._resolution) return;
+            const candles = this._visibleCandles();
+            if (candles.length) this._vp.fitToCandles(candles);
+            this.invalidate('static');
+        });
+
+        this._ds.addEventListener('data:live-tick', (e) => {
+            const { symbol, resolution } = e.detail;
+            if (symbol !== this._symbol || resolution !== this._resolution) return;
+            this.invalidate('static');
+        });
+
+        this._ds.addEventListener('data:close', (e) => {
+            const { symbol, resolution } = e.detail;
+            if (symbol !== this._symbol || resolution !== this._resolution) return;
+            this.invalidate('static');
+        });
+
+        // WS events — route to buffer or directly to DataStore
+        this._ws.addEventListener('partial', (e) => {
+            const d = e.detail;
+            if (this._ds.isBuffering(d.symbol, d.resolution)) {
+                this._ds.bufferWsEvent(d.symbol, d.resolution, d);
+            } else {
+                this._ds.applyPartial(d.symbol, d.resolution, d);
+            }
+        });
+
+        this._ws.addEventListener('close', (e) => {
+            const d = e.detail;
+            if (this._ds.isBuffering(d.symbol, d.resolution)) {
+                this._ds.bufferWsEvent(d.symbol, d.resolution, d);
+            } else {
+                this._ds.applyClose(d.symbol, d.resolution, d);
+            }
+        });
+
+        this._interaction.on('hover', (pos) => {
+            this._hoverPos = pos;
+            if (pos) {
+                const { from, to } = this._vp.visibleRange();
+                const candles    = this._ds.getWindow(this._symbol, this._resolution, from, to);
+                const allCandles = this._ds.getAll(this._symbol, this._resolution);
+                this._hoverCandle = this._findCandleAtX(candles, allCandles, pos.x);
+            } else {
+                this._hoverCandle = null;
+            }
+            this.invalidate('overlay');
+        });
+
+        this._interaction.on('open-symbol-picker', () => this._picker.open());
+
+        this._interaction.on('resolution-change', (res) => this.setResolution(res));
+
+        this._interaction.on('prefetch-left', async ({ before }) => {
+            if (!this._symbol) return;
+            try {
+                await this._ds.load(this._symbol, this._resolution, { before });
+                await this._backfillLeftHistory();
+            } finally {
+                this._interaction.resetPrefetch();
+            }
+        });
+    }
+
+    /**
+     * Keeps requesting older bars until the visible window is no longer in the left-prefetch
+     * zone (same rule as wheel/pan prefetch) or the store/API cannot move the oldest bar left.
+     */
+    async _backfillLeftHistory() {
+        if (!this._symbol || this._destroyed || this._backfillLeftRunning) return;
+        this._backfillLeftRunning = true;
+        const maxRounds = 200;
+        try {
+            for (let round = 0; round < maxRounds && !this._destroyed; round++) {
+                const params = getLeftPrefetchParams(this._ds, this._symbol, this._resolution, this._vp);
+                if (!params) break;
+
+                const prevOldest = this._ds.getOldest(this._symbol, this._resolution);
+                if (prevOldest == null) break;
+
+                try {
+                    await this._ds.load(this._symbol, this._resolution, params);
+                } catch (err) {
+                    console.error('[RigoView] Left history backfill failed', err);
+                    break;
+                }
+
+                const newOldest = this._ds.getOldest(this._symbol, this._resolution);
+                if (newOldest == null || newOldest >= prevOldest) break;
+
+                const visible = this._visibleCandles();
+                if (visible.length) this._vp.fitToCandles(visible);
+                this.invalidate('static');
+            }
+        } finally {
+            this._backfillLeftRunning = false;
+        }
+    }
+
+    _findCandleAtX(candles, allCandles, x) {
+        if (!candles.length || !allCandles.length) return null;
+        const candleMs     = CANDLE_MS[this._resolution] ?? CANDLE_MS['1h'];
+        const n            = allCandles.length;
+        const baseCompactT = allCandles[n - 1].t - (n - 1) * candleMs;
+        const indexMap     = new Map(allCandles.map((c, i) => [c.t, i]));
+        let best = null, bestDist = Infinity;
+        for (const c of candles) {
+            const fullIdx  = indexMap.get(c.t) ?? 0;
+            const compactT = baseCompactT + fullIdx * candleMs;
+            const dist = Math.abs(this._vp.timeToX(compactT) - x);
+            if (dist < bestDist) { bestDist = dist; best = c; }
+        }
+        return bestDist < 60 ? best : null;
+    }
+
+    _visibleCandles() {
+        if (!this._symbol) return [];
+        const { from, to } = this._vp.visibleRange();
+        return this._ds.getWindow(this._symbol, this._resolution, from, to);
+    }
+
+    _maxRightEdgeT(latestTs, resolution = this._resolution) {
+        if (!Number.isFinite(latestTs)) return null;
+        const candleMs = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
+        return latestTs + candleMs * 0.5 + this._vp.msPerPixel * RIGHT_GUTTER_PX;
+    }
+
+    _clampRightEdgeToLatest() {
+        if (!this._symbol) return;
+        const allCandles = this._ds.getAll(this._symbol, this._resolution);
+        if (!allCandles.length) return;
+        const latestTs = allCandles[allCandles.length - 1].t;
+        const maxRightEdgeT = this._maxRightEdgeT(latestTs, this._resolution);
+        if (maxRightEdgeT === null) return;
+        if (this._vp.rightEdgeT > maxRightEdgeT) this._vp.rightEdgeT = maxRightEdgeT;
+    }
+
+    _alignRightEdgeToLatest(candles, resolution) {
+        if (!candles.length) return;
+        const last = candles[candles.length - 1];
+        const maxRightEdgeT = this._maxRightEdgeT(last.t, resolution);
+        if (maxRightEdgeT !== null) this._vp.rightEdgeT = maxRightEdgeT;
+    }
+
+    // ---- RAF loop ----
+
+    invalidate(layer) {
+        if (layer === 'static') { this._staticDirty = true; this._overlayDirty = true; }
+        if (layer === 'overlay') this._overlayDirty = true;
+        if (!this._rafScheduled) {
+            this._rafScheduled = true;
+            requestAnimationFrame(() => this._frame());
+        }
+    }
+
+    _frame() {
+        if (this._destroyed) return;
+        this._rafScheduled = false;
+        if (this._staticDirty)  this._drawStatic();
+        if (this._overlayDirty) this._drawOverlay();
+        this._staticDirty  = false;
+        this._overlayDirty = false;
+    }
+
+    _drawStatic() {
+        const dpr  = this._dpr;
+        const ctx  = this._staticCanvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        this._clampRightEdgeToLatest();
+
+        const vp         = this._vp;
+        const theme      = this._theme;
+        const resolution = this._resolution;
+        const { from, to } = vp.visibleRange();
+        const allCandles = this._symbol ? this._ds.getAll(this._symbol, resolution) : [];
+        const candles    = this._symbol ? this._ds.getWindow(this._symbol, resolution, from, to) : [];
+        const avail      = this._symbol ? this._ds.getAvailability(this._symbol, resolution) : null;
+        const priceScale = this._meta?.priceScale;
+
+        drawBackground(ctx, vp, theme);
+        drawGrid(ctx, vp, theme);
+        drawVolume(ctx, candles, allCandles, vp, resolution, theme);
+        drawCandles(ctx, candles, allCandles, vp, resolution, theme);
+
+        // No-data marker when panned past availability boundary
+        if (avail && candles.length === 0 && this._ds.getAll(this._symbol, resolution).length > 0) {
+            const all = this._ds.getAll(this._symbol, resolution);
+            if (from < all[0].t)            drawNoDataMarker(ctx, vp, theme, 'left');
+            if (to   > all[all.length - 1].t) drawNoDataMarker(ctx, vp, theme, 'right');
+        }
+
+        // Live indicator (forming candle's close price)
+        const all = this._symbol ? this._ds.getAll(this._symbol, resolution) : [];
+        if (all.length) {
+            const last = all[all.length - 1];
+            if (last.live) drawLiveIndicator(ctx, last.c, vp, theme);
+        }
+
+        drawTimeAxis(ctx, vp, theme);
+        drawPriceAxis(ctx, vp, theme, priceScale);
+        drawVolumeAxis(ctx, candles, vp, theme);
+        drawVolumeSeparator(ctx, vp, theme);
+    }
+
+    _drawOverlay() {
+        const dpr = this._dpr;
+        const ctx = this._overlayCanvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, this._overlayCanvas.width / dpr, this._overlayCanvas.height / dpr);
+
+        drawCrosshair(ctx, this._hoverPos, this._hoverCandle, this._vp, this._theme, this._meta?.priceScale, this._resolution);
+    }
+
+    // ---- Public commands ----
+
+    async _load() {
+        if (!this._symbol) return;
+
+        // §4.4 sync contract: subscribe first, buffer WS events, then HTTP fetch
+        this._ds.startBuffering(this._symbol, this._resolution);
+        this._ws.subscribe(this._symbol, this._resolution);
+        this._interaction.setContext(this._symbol, this._resolution);
+        this._vp.adjustZoomForResolution(this._resolution);
+        this._updateToolbar();
+
+        try {
+            this._meta = await this._http.getSymbolMeta(this._symbol);
+        } catch {
+            this._meta = null;
+        }
+
+        try {
+            await this._ds.load(this._symbol, this._resolution);
+            await this._backfillLeftHistory();
+        } catch (err) {
+            console.error('[RigoView] Failed to load candles', err);
+        }
+    }
+
+    _updateToolbar() {
+        this._symbolBtn.textContent = this._symbol ?? 'Select symbol';
+        for (const [r, btn] of Object.entries(this._resBtns)) {
+            const active = r === this._resolution;
+            btn.style.color      = active ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
+            btn.style.background = active ? 'rgba(255,255,255,0.1)' : 'none';
+        }
+    }
+
+    async setSymbol(symbol) {
+        if (symbol === this._symbol) return;
+        if (this._symbol) this._ws.unsubscribe(this._symbol, this._resolution);
+        this._symbol      = symbol;
+        this._options.onSymbolChange?.(symbol);
+        this._meta        = null;
+        this._hoverPos    = null;
+        this._hoverCandle = null;
+        this._vp.priceLocked = false;
+        await this._load();
+    }
+
+    async setResolution(resolution) {
+        if (resolution === this._resolution) return;
+        if (this._symbol) this._ws.unsubscribe(this._symbol, this._resolution);
+        this._resolution   = resolution;
+        writeStoredResolution(resolution);
+        this._updateToolbar();
+        this._vp.adjustZoomForResolution(resolution);
+
+        if (this._symbol) {
+            this._ds.startBuffering(this._symbol, resolution);
+            this._ws.subscribe(this._symbol, resolution);
+            this._interaction.setContext(this._symbol, resolution);
+            try {
+                await this._ds.load(this._symbol, resolution);
+                const candles = this._ds.getAll(this._symbol, resolution);
+                this._alignRightEdgeToLatest(candles, resolution);
+                // Match initial _load / data:loaded: scale Y to the on-screen window so
+                // off-screen history (bad ticks, wide ranges) does not squash candles.
+                const visible = this._visibleCandles();
+                if (visible.length) this._vp.fitToCandles(visible);
+                else if (candles.length) this._vp.fitToCandles(candles);
+                this.invalidate('static');
+                await this._backfillLeftHistory();
+            } catch (err) {
+                console.error('[RigoView] Failed to load candles', err);
+            }
+        }
+    }
+
+    jumpTo(timestamp) {
+        this._vp.rightEdgeT = timestamp + this._vp.width * this._vp.msPerPixel * 0.5;
+        this.invalidate('static');
+        void this._backfillLeftHistory();
+    }
+
+    destroy() {
+        this._destroyed = true;
+        this._resizeObserver?.disconnect();
+        this._interaction?.destroy();
+        this._ws?.destroy();
+        this._picker?.destroy();
+        // Clear container
+        while (this._container.firstChild) this._container.removeChild(this._container.firstChild);
+        this._container.style.position = '';
+    }
+}
