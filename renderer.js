@@ -1,5 +1,6 @@
 // renderer.js — all canvas draw calls; stateless functions, no side effects
 import { VOL_RATIO } from './viewport.js';
+import dayjs from './dayjs.min.js';
 
 /** Space below the candle/volume divider before volume bars may start (px). */
 const VOL_TOP_GAP_PX = 12;
@@ -84,31 +85,24 @@ function firstGridT(fromT, step) {
 }
 
 function formatTimeLabel(t, step) {
-    const d = new Date(t);
-    if (step >= 86400e3) {
-        return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
-    }
-    // At midnight, show date even for hour/minute steps
-    if (d.getUTCHours() === 0 && d.getUTCMinutes() === 0 && step >= 3600e3) {
-        return d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
-    }
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
-    return `${hh}:${mm}`;
+    const d = dayjs(t);
+    if (step >= 86400e3) return d.format('MMM D');
+    if (d.hour() === 0 && d.minute() === 0 && step >= 3600e3) return d.format('MMM D');
+    return d.format('HH:mm');
 }
 
-/** UTC Jan 1 00:00:00 label for the time axis (epoch ms). */
+/** Jan 1 00:00:00 label for the time axis (local timezone). */
 function formatYearBoundaryLabel(t) {
-    return String(new Date(t).getUTCFullYear());
+    return dayjs(t).format('YYYY');
 }
 
-/** Each UTC year start in [fromT, toT] inclusive. */
-function utcYearStartsInRange(fromT, toT) {
+/** Each local-timezone year start in [fromT, toT] inclusive. */
+function localYearStartsInRange(fromT, toT) {
     const out = [];
-    let y = new Date(fromT).getUTCFullYear();
-    const yEnd = new Date(toT).getUTCFullYear();
+    let y = dayjs(fromT).year();
+    const yEnd = dayjs(toT).year();
     for (; y <= yEnd; y++) {
-        const t = Date.UTC(y, 0, 1, 0, 0, 0, 0);
+        const t = dayjs().year(y).startOf('year').valueOf();
         if (t >= fromT && t <= toT) out.push(t);
     }
     return out;
@@ -121,7 +115,7 @@ function utcYearStartsInRange(fromT, toT) {
 function buildTimeAxisLabelItems(from, to, step) {
     const gridTs = [];
     for (let t = firstGridT(from, step); t <= to; t += step) gridTs.push(t);
-    const yearTs = utcYearStartsInRange(from, to);
+    const yearTs = localYearStartsInRange(from, to);
     const replaceRad = step * 0.51;
     const nearYear = (g) => yearTs.some((yt) => Math.abs(g - yt) <= replaceRad);
     const items = [
@@ -132,15 +126,12 @@ function buildTimeAxisLabelItems(from, to, step) {
     return items;
 }
 
-/** Bottom crosshair strip: year always; time only for intraday resolutions. */
+/** Bottom crosshair strip: date always; time only for intraday resolutions (local timezone). */
 function formatCrosshairTimeLabel(t, resolution) {
-    const d = new Date(t);
-    const datePart = d.toLocaleDateString('en', { month: 'short', day: 'numeric', year: 'numeric' });
+    const d = dayjs(t);
     const candleMs = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
-    if (candleMs >= 86400e3) return datePart;
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
-    return `${datePart} ${hh}:${mm}`;
+    if (candleMs >= 86400e3) return d.format('MMM D, YYYY');
+    return d.format('MMM D, YYYY HH:mm');
 }
 
 function formatPrice(p, priceScale) {
