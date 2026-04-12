@@ -10,6 +10,7 @@ import {
     PRICE_AXIS_W, TIME_AXIS_H,
     drawBackground, drawGrid, drawCandles, drawVolume, drawVolumeSeparator,
     drawTimeAxis, drawPriceAxis, drawVolumeAxis, drawCrosshair, drawLiveIndicator, drawNoDataMarker,
+    rowIndexByRef,
 } from './renderer.js';
 
 const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
@@ -49,8 +50,18 @@ export class Chart {
         this._hoverPos   = null;
         this._hoverCandle = null;
         this._barWidthPx = options.barWidthPx ?? null;
+        this._ignoreGaps = options.ignoreGaps !== false;
         /** Serializes left-history pagination so it runs without relying on wheel/pan. */
         this._backfillLeftRunning = false;
+
+        /** Ordered symbol navigation history (toolbar back/forward). */
+        this._symbolHistory = [];
+        this._symbolHistoryIdx = -1;
+        this._navigatingHistory = false;
+        if (this._symbol) {
+            this._symbolHistory.push(this._symbol);
+            this._symbolHistoryIdx = 0;
+        }
 
         // RAF dirty flags
         this._staticDirty  = true;
@@ -107,6 +118,31 @@ export class Chart {
         this._symbolBtn.addEventListener('click', () => this._picker.open());
         this._toolbar.appendChild(this._symbolBtn);
 
+        const navBtnStyle = [
+            'background:none;border:none;border-radius:3px',
+            'padding:3px 8px;cursor:pointer;font:14px monospace',
+            'color:var(--text-dim-color,#505870)',
+            'flex-shrink:0;min-width:28px',
+        ].join(';');
+
+        this._backBtn = document.createElement('button');
+        this._backBtn.type = 'button';
+        this._backBtn.textContent = '\u2190';
+        this._backBtn.title = 'Previous symbol';
+        this._backBtn.setAttribute('aria-label', 'Previous symbol');
+        this._backBtn.style.cssText = navBtnStyle;
+        this._backBtn.addEventListener('click', () => void this._goBack());
+        this._toolbar.appendChild(this._backBtn);
+
+        this._fwdBtn = document.createElement('button');
+        this._fwdBtn.type = 'button';
+        this._fwdBtn.textContent = '\u2192';
+        this._fwdBtn.title = 'Next symbol';
+        this._fwdBtn.setAttribute('aria-label', 'Next symbol');
+        this._fwdBtn.style.cssText = navBtnStyle;
+        this._fwdBtn.addEventListener('click', () => void this._goForward());
+        this._toolbar.appendChild(this._fwdBtn);
+
         // Resolution buttons
         this._resBtns = {};
         for (const r of RESOLUTIONS) {
@@ -117,6 +153,7 @@ export class Chart {
                 'background:none;border:none;border-radius:3px',
                 'padding:3px 8px;cursor:pointer;font:12px monospace',
                 'color:var(--text-dim-color,#505870)',
+                'flex-shrink:0',
             ].join(';');
             btn.addEventListener('click', () => this.setResolution(r));
             this._resBtns[r] = btn;
@@ -266,7 +303,7 @@ export class Chart {
             this._hoverPos = pos;
             if (pos) {
                 const { from, to } = this._vp.visibleRange();
-                const candles    = this._ds.getWindow(this._symbol, this._resolution, from, to);
+                const candles    = this._ds.getWindow(this._symbol, this._resolution, from, to, this._ignoreGaps);
                 const allCandles = this._ds.getAll(this._symbol, this._resolution);
                 this._hoverCandle = this._findCandleAtX(candles, allCandles, pos.x);
             } else {
@@ -327,16 +364,24 @@ export class Chart {
 
     _findCandleAtX(candles, allCandles, x) {
         if (!candles.length || !allCandles.length) return null;
-        const candleMs     = CANDLE_MS[this._resolution] ?? CANDLE_MS['1h'];
-        const n            = allCandles.length;
-        const baseCompactT = allCandles[n - 1].t - (n - 1) * candleMs;
-        const indexMap     = new Map(allCandles.map((c, i) => [c.t, i]));
+        const candleMs = CANDLE_MS[this._resolution] ?? CANDLE_MS['1h'];
         let best = null, bestDist = Infinity;
-        for (const c of candles) {
-            const fullIdx  = indexMap.get(c.t) ?? 0;
-            const compactT = baseCompactT + fullIdx * candleMs;
-            const dist = Math.abs(this._vp.timeToX(compactT) - x);
-            if (dist < bestDist) { bestDist = dist; best = c; }
+        if (this._ignoreGaps) {
+            const n            = allCandles.length;
+            const baseCompactT = allCandles[n - 1].t - (n - 1) * candleMs;
+            const rowIdx       = rowIndexByRef(allCandles);
+            for (const c of candles) {
+                const fullIdx = rowIdx.get(c);
+                if (fullIdx === undefined) continue;
+                const compactT = baseCompactT + fullIdx * candleMs;
+                const dist = Math.abs(this._vp.timeToX(compactT) - x);
+                if (dist < bestDist) { bestDist = dist; best = c; }
+            }
+        } else {
+            for (const c of candles) {
+                const dist = Math.abs(this._vp.timeToX(c.t) - x);
+                if (dist < bestDist) { bestDist = dist; best = c; }
+            }
         }
         return bestDist < 60 ? best : null;
     }
@@ -344,7 +389,7 @@ export class Chart {
     _visibleCandles() {
         if (!this._symbol) return [];
         const { from, to } = this._vp.visibleRange();
-        return this._ds.getWindow(this._symbol, this._resolution, from, to);
+        return this._ds.getWindow(this._symbol, this._resolution, from, to, this._ignoreGaps);
     }
 
     _maxRightEdgeT(latestTs, resolution = this._resolution) {
@@ -402,14 +447,14 @@ export class Chart {
         const resolution = this._resolution;
         const { from, to } = vp.visibleRange();
         const allCandles = this._symbol ? this._ds.getAll(this._symbol, resolution) : [];
-        const candles    = this._symbol ? this._ds.getWindow(this._symbol, resolution, from, to) : [];
+        const candles    = this._symbol ? this._ds.getWindow(this._symbol, resolution, from, to, this._ignoreGaps) : [];
         const avail      = this._symbol ? this._ds.getAvailability(this._symbol, resolution) : null;
         const priceScale = this._meta?.priceScale;
 
         drawBackground(ctx, vp, theme);
         drawGrid(ctx, vp, theme);
-        drawVolume(ctx, candles, allCandles, vp, resolution, theme);
-        drawCandles(ctx, candles, allCandles, vp, resolution, theme);
+        drawVolume(ctx, candles, allCandles, vp, resolution, theme, this._ignoreGaps);
+        drawCandles(ctx, candles, allCandles, vp, resolution, theme, this._ignoreGaps);
 
         // No-data marker when panned past availability boundary
         if (avail && candles.length === 0 && this._ds.getAll(this._symbol, resolution).length > 0) {
@@ -486,10 +531,51 @@ export class Chart {
             btn.style.color      = active ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
             btn.style.background = active ? 'rgba(255,255,255,0.1)' : 'none';
         }
+        this._updateNavButtons();
+    }
+
+    _updateNavButtons() {
+        const canBack = this._symbolHistoryIdx > 0;
+        const canFwd  = this._symbolHistoryIdx < this._symbolHistory.length - 1;
+        this._backBtn.disabled = !canBack;
+        this._fwdBtn.disabled  = !canFwd;
+        this._backBtn.style.opacity = canBack ? '1' : '0.3';
+        this._fwdBtn.style.opacity  = canFwd  ? '1' : '0.3';
+        this._backBtn.style.pointerEvents = canBack ? 'auto' : 'none';
+        this._fwdBtn.style.pointerEvents  = canFwd  ? 'auto' : 'none';
+        this._backBtn.style.cursor = canBack ? 'pointer' : 'default';
+        this._fwdBtn.style.cursor  = canFwd  ? 'pointer' : 'default';
+    }
+
+    async _goBack() {
+        if (this._symbolHistoryIdx <= 0) return;
+        this._navigatingHistory = true;
+        try {
+            this._symbolHistoryIdx--;
+            await this.setSymbol(this._symbolHistory[this._symbolHistoryIdx]);
+        } finally {
+            this._navigatingHistory = false;
+        }
+    }
+
+    async _goForward() {
+        if (this._symbolHistoryIdx >= this._symbolHistory.length - 1) return;
+        this._navigatingHistory = true;
+        try {
+            this._symbolHistoryIdx++;
+            await this.setSymbol(this._symbolHistory[this._symbolHistoryIdx]);
+        } finally {
+            this._navigatingHistory = false;
+        }
     }
 
     async setSymbol(symbol) {
         if (symbol === this._symbol) return;
+        if (!this._navigatingHistory) {
+            this._symbolHistory.splice(this._symbolHistoryIdx + 1);
+            this._symbolHistory.push(symbol);
+            this._symbolHistoryIdx = this._symbolHistory.length - 1;
+        }
         if (this._symbol) this._ws.unsubscribe(this._symbol, this._resolution);
         this._symbol      = symbol;
         this._options.onSymbolChange?.(symbol);

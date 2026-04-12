@@ -114,6 +114,7 @@ new RigoView(container, options)
 | `symbol` | `string \| null` | `null` | Initial symbol id (e.g. `'Binance:BTCUSDT'`). |
 | `resolution` | `string` | last used or `'1h'` | One of `1m`, `5m`, `30m`, `1h`, `1d`, `1w`. Persisted in `localStorage`. |
 | `onSymbolChange` | `(id: string) => void` | `null` | Fired when the user picks a new symbol via the built-in picker. |
+| `ignoreGaps` | `boolean` | compact (default) | Omit the option or pass any value except `false` to collapse gaps (weekends, missing buckets) so bars are evenly spaced. Pass **`false` exactly** to use each bar’s real open time (empty space where nothing traded). |
 
 `container` must be an `HTMLElement` that has a non-zero size. The chart fills it and observes size changes.
 

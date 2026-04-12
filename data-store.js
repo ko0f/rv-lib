@@ -118,14 +118,48 @@ export class DataStore extends EventTarget {
         this.dispatchEvent(new CustomEvent('data:close', { detail: { symbol, resolution } }));
     }
 
-    getWindow(symbol, resolution, fromT, toT) {
+    getWindow(symbol, resolution, fromT, toT, ignoreGaps = true) {
         const candles = this._cache[symbol]?.[resolution]?.candles ?? [];
         if (!candles.length) return [];
+        const candleMs = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
+        const n        = candles.length;
+        const compact  = ignoreGaps !== false;
+
+        if (!compact) {
+            const margin   = candleMs;
+            const fromBound = fromT - margin;
+            const toBound   = toT + margin;
+            let lo = 0;
+            let hi = n - 1;
+            let start = n;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                if (candles[mid].t >= fromBound) {
+                    start = mid;
+                    hi = mid - 1;
+                } else {
+                    lo = mid + 1;
+                }
+            }
+            lo = 0;
+            hi = n - 1;
+            let end = -1;
+            while (lo <= hi) {
+                const mid = (lo + hi) >> 1;
+                if (candles[mid].t <= toBound) {
+                    end = mid;
+                    lo = mid + 1;
+                } else {
+                    hi = mid - 1;
+                }
+            }
+            if (start > end) return [];
+            return candles.slice(start, end + 1);
+        }
+
         // Compact time is anchored to the last candle: compactT[i] = lastT - (n-1-i)*candleMs.
         // This ensures the last candle's compact time equals its real time, keeping the
         // viewport (which uses real time for rightEdgeT) aligned with compact positions.
-        const candleMs     = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
-        const n            = candles.length;
         const lastT        = candles[n - 1].t;
         const baseCompactT = lastT - (n - 1) * candleMs;
         const fromIdx = Math.max(0, Math.floor((fromT - baseCompactT) / candleMs) - 1);

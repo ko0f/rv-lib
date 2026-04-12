@@ -11,6 +11,7 @@ export class RigoView {
             resolution:          options.resolution,
             onSymbolChange:      options.onSymbolChange      ?? null,
             barWidthPx:          options.barWidthPx          ?? null,
+            ignoreGaps:          options.ignoreGaps          !== false,
         });
     }
 

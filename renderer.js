@@ -13,6 +13,11 @@ const FONT = '11px monospace';
 // Resolution → candle duration in ms
 const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
 
+/** Row index by object identity (duplicate `t` timestamps do not collapse). */
+export function rowIndexByRef(allCandles) {
+    return new Map(allCandles.map((row, i) => [row, i]));
+}
+
 // ---- Grid interval helpers ----
 
 function niceNumber(value) {
@@ -213,21 +218,32 @@ export function drawGrid(ctx, viewport, theme) {
     ctx.restore();
 }
 
-export function drawCandles(ctx, candles, allCandles, viewport, resolution, theme) {
+export function drawCandles(ctx, candles, allCandles, viewport, resolution, theme, ignoreGaps = true) {
     if (!candles.length || !allCandles.length) return;
+    const compact      = ignoreGaps !== false;
     const candleMs     = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
     const cw           = candleMs / viewport.msPerPixel;
     const bw           = Math.max(1, cw - Math.max(1, cw * 0.15));
-    const priceH       = viewport.height * (1 - VOL_RATIO);
-    const n            = allCandles.length;
-    const baseCompactT = allCandles[n - 1].t - (n - 1) * candleMs;
-    const indexMap     = new Map(allCandles.map((c, i) => [c.t, i]));
+    const priceH = viewport.height * (1 - VOL_RATIO);
+    const n        = allCandles.length;
+    let baseCompactT;
+    let rowIdx;
+    if (compact) {
+        baseCompactT = allCandles[n - 1].t - (n - 1) * candleMs;
+        rowIdx = rowIndexByRef(allCandles);
+    }
 
     ctx.save();
     for (const c of candles) {
-        const fullIdx  = indexMap.get(c.t) ?? 0;
-        const compactT = baseCompactT + fullIdx * candleMs;
-        const cx = viewport.timeToX(compactT) + cw / 2;
+        let plotT;
+        if (compact) {
+            const i = rowIdx.get(c);
+            if (i === undefined) continue;
+            plotT = baseCompactT + i * candleMs;
+        } else {
+            plotT = c.t;
+        }
+        const cx = viewport.timeToX(plotT) + cw / 2;
         if (cx < -cw || cx > viewport.width + cw) continue;
 
         const isUp     = c.c >= c.o;
@@ -273,9 +289,10 @@ function candleVolumeTotal(c) {
     return c.v ?? 0;
 }
 
-export function drawVolume(ctx, candles, allCandles, viewport, resolution, theme) {
+export function drawVolume(ctx, candles, allCandles, viewport, resolution, theme, ignoreGaps = true) {
     if (!candles.length || !allCandles.length) return;
 
+    const compact      = ignoreGaps !== false;
     const candleMs     = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
     const cw           = candleMs / viewport.msPerPixel;
     const bw           = Math.max(1, cw - Math.max(1, cw * 0.15));
@@ -284,9 +301,13 @@ export function drawVolume(ctx, candles, allCandles, viewport, resolution, theme
     const volDrawH     = Math.max(0, volH - VOL_TOP_GAP_PX);
     const maxVol       = candles.reduce((m, c) => Math.max(m, candleVolumeTotal(c)), 0);
     if (!maxVol || volDrawH <= 0) return;
-    const n            = allCandles.length;
-    const baseCompactT = allCandles[n - 1].t - (n - 1) * candleMs;
-    const indexMap     = new Map(allCandles.map((c, i) => [c.t, i]));
+    const n = allCandles.length;
+    let baseCompactT;
+    let rowIdx;
+    if (compact) {
+        baseCompactT = allCandles[n - 1].t - (n - 1) * candleMs;
+        rowIdx = rowIndexByRef(allCandles);
+    }
     const Y_base       = priceH + volH;
     const hasAnyPositiveVs = candles.some((c) => c.vs != null && Number(c.vs) > 0);
 
@@ -294,9 +315,15 @@ export function drawVolume(ctx, candles, allCandles, viewport, resolution, theme
     for (const c of candles) {
         const vtot = candleVolumeTotal(c);
         if (!vtot) continue;
-        const fullIdx  = indexMap.get(c.t) ?? 0;
-        const compactT = baseCompactT + fullIdx * candleMs;
-        const cx = viewport.timeToX(compactT) + cw / 2;
+        let plotT;
+        if (compact) {
+            const i = rowIdx.get(c);
+            if (i === undefined) continue;
+            plotT = baseCompactT + i * candleMs;
+        } else {
+            plotT = c.t;
+        }
+        const cx = viewport.timeToX(plotT) + cw / 2;
         if (cx < -cw || cx > viewport.width + cw) continue;
 
         const bx = Math.round(cx - bw / 2);
@@ -492,7 +519,7 @@ export function drawCrosshair(ctx, pos, candle, viewport, theme, priceScale, res
     // Time label on axis (same treatment as price label: bright box, dark text)
     {
         const chartX = Math.max(0, Math.min(width, x));
-        const t = viewport.xToTime(chartX);
+        const t = candle ? candle.t : viewport.xToTime(chartX);
         const label = formatCrosshairTimeLabel(t, resolution);
         ctx.font = FONT;
         const padX = 5;
