@@ -142,3 +142,14 @@ Always call `destroy()` on unmount to release the WebSocket and event listeners.
 ## Theming
 
 Colors are read from CSS custom properties on the container element at construction time — see [theme.js](theme.js). Override them by setting variables like `--rv-bg`, `--rv-up`, `--rv-down`, etc. on (or above) your container.
+
+## Publishing to npm
+
+From this directory, with an npm login that can publish `rv-lib`:
+
+```sh
+npm run pack:dry   # optional: inspect tarball contents
+npm publish        # publishes the version in package.json
+```
+
+Bump `"version"` in `package.json` (and `package-lock.json` if present) before each release. Tag the same version in git if you track releases in the standalone [rv-lib](https://github.com/ko0f/rv-lib) repo.
