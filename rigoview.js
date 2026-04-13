@@ -12,6 +12,7 @@ export class RigoView {
             onSymbolChange:      options.onSymbolChange      ?? null,
             barWidthPx:          options.barWidthPx          ?? null,
             ignoreGaps:          options.ignoreGaps          !== false,
+            disableTopBar:       options.disableTopBar       === true,
         });
     }
 

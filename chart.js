@@ -51,6 +51,7 @@ export class Chart {
         this._hoverCandle = null;
         this._barWidthPx = options.barWidthPx ?? null;
         this._ignoreGaps = options.ignoreGaps !== false;
+        this._disableTopBar = options.disableTopBar === true;
         /** Serializes left-history pagination so it runs without relying on wheel/pan. */
         this._backfillLeftRunning = false;
 
@@ -207,6 +208,7 @@ export class Chart {
         wrapper.appendChild(this._toolbar);
         wrapper.appendChild(this._canvasWrap);
         this._container.appendChild(wrapper);
+        if (this._disableTopBar) this._toolbar.style.display = 'none';
     }
 
     _chartW() { return Math.max(1, this._canvasWrap.clientWidth  - PRICE_AXIS_W); }
