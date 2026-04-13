@@ -28,5 +28,7 @@ export function readTheme(el) {
         /** Candle/volume pane divider; `--rigoview-volume-separator-width`, `--rigoview-volume-separator-color`. */
         volumeSeparatorLineWidth,
         volumeSeparatorColor: v('--rigoview-volume-separator-color') || '#67686e',
+        /** Vertical line between plot and price labels; `--rigoview-price-axis-separator-color`. */
+        priceAxisSeparatorColor: v('--rigoview-price-axis-separator-color') || '#67686e',
     };
 }

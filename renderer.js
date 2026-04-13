@@ -409,7 +409,7 @@ export function drawPriceAxis(ctx, viewport, theme, priceScale) {
     ctx.fillStyle = theme.bg;
     ctx.fillRect(x0, 0, PRICE_AXIS_W, height + TIME_AXIS_H);
 
-    ctx.strokeStyle = theme.gridLine;
+    ctx.strokeStyle = theme.priceAxisSeparatorColor;
     ctx.lineWidth   = 1;
     ctx.beginPath();
     ctx.moveTo(x0 + 0.5, 0);

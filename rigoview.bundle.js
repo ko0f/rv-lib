@@ -332,7 +332,9 @@ function readTheme(el) {
     livePrice: v("--text-profit") || "#3ac18a",
     /** Candle/volume pane divider; `--rigoview-volume-separator-width`, `--rigoview-volume-separator-color`. */
     volumeSeparatorLineWidth,
-    volumeSeparatorColor: v("--rigoview-volume-separator-color") || "#67686e"
+    volumeSeparatorColor: v("--rigoview-volume-separator-color") || "#67686e",
+    /** Vertical line between plot and price labels; `--rigoview-price-axis-separator-color`. */
+    priceAxisSeparatorColor: v("--rigoview-price-axis-separator-color") || "#67686e"
   };
 }
 
@@ -1384,7 +1386,7 @@ function drawPriceAxis(ctx, viewport, theme, priceScale) {
   const x0 = width;
   ctx.fillStyle = theme.bg;
   ctx.fillRect(x0, 0, PRICE_AXIS_W, height + TIME_AXIS_H);
-  ctx.strokeStyle = theme.gridLine;
+  ctx.strokeStyle = theme.priceAxisSeparatorColor;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(x0 + 0.5, 0);

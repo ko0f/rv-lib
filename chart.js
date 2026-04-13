@@ -441,6 +441,7 @@ export class Chart {
         const dpr  = this._dpr;
         const ctx  = this._staticCanvas.getContext('2d');
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, this._staticCanvas.width / dpr, this._staticCanvas.height / dpr);
 
         this._clampRightEdgeToLatest();
 
