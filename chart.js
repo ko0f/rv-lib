@@ -37,6 +37,28 @@ function resolveInitialResolution(explicit) {
     return readStoredResolution() ?? '1h';
 }
 
+function resolveResolutionForMeta(currentResolution, meta) {
+    const supported = Array.isArray(meta?.supportedResolutions)
+        ? meta.supportedResolutions.filter((r) => RESOLUTION_SET.has(r))
+        : null;
+    if (supported && supported.includes(currentResolution)) return currentResolution;
+    const minResolution = typeof meta?.minResolution === 'string' && RESOLUTION_SET.has(meta.minResolution)
+        ? meta.minResolution
+        : null;
+    if (minResolution && (!supported || supported.includes(minResolution))) return minResolution;
+    if (supported && supported.length) return supported[0];
+    return currentResolution;
+}
+
+function getUnsupportedResolutionFallback(err) {
+    const payload = err && typeof err === 'object' && err.error && typeof err.error === 'object'
+        ? err.error
+        : err;
+    if (!payload || payload.error !== 'unsupported_resolution') return null;
+    const fallback = typeof payload.minResolution === 'string' ? payload.minResolution : null;
+    return fallback && RESOLUTION_SET.has(fallback) ? fallback : null;
+}
+
 const RIGHT_GUTTER_PX = 20;
 
 export class Chart {
@@ -493,6 +515,18 @@ export class Chart {
     async _load() {
         if (!this._symbol) return;
 
+        try {
+            this._meta = await this._http.getSymbolMeta(this._symbol);
+        } catch {
+            this._meta = null;
+        }
+
+        const effectiveResolution = resolveResolutionForMeta(this._resolution, this._meta);
+        if (effectiveResolution !== this._resolution) {
+            this._resolution = effectiveResolution;
+            writeStoredResolution(effectiveResolution);
+        }
+
         // §4.4 sync contract: subscribe first, buffer WS events, then HTTP fetch
         this._ds.startBuffering(this._symbol, this._resolution);
         this._ws.subscribe(this._symbol, this._resolution);
@@ -503,12 +537,6 @@ export class Chart {
             this._vp.msPerPixel = candleMs / this._barWidthPx;
         }
         this._updateToolbar();
-
-        try {
-            this._meta = await this._http.getSymbolMeta(this._symbol);
-        } catch {
-            this._meta = null;
-        }
 
         try {
             const loadParams = this._barWidthPx
@@ -523,16 +551,28 @@ export class Chart {
             this.invalidate('static');
             await this._backfillLeftHistory();
         } catch (err) {
+            const fallback = getUnsupportedResolutionFallback(err);
+            if (fallback && fallback !== this._resolution) {
+                await this.setResolution(fallback);
+                return;
+            }
             console.error('[RigoView] Failed to load candles', err);
         }
     }
 
     _updateToolbar() {
         this._symbolBtn.textContent = this._symbol ?? 'Select symbol';
+        const supported = Array.isArray(this._meta?.supportedResolutions)
+            ? new Set(this._meta.supportedResolutions.filter((r) => RESOLUTION_SET.has(r)))
+            : null;
         for (const [r, btn] of Object.entries(this._resBtns)) {
             const active = r === this._resolution;
+            const enabled = !supported || supported.has(r);
             btn.style.color      = active ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
             btn.style.background = active ? 'rgba(255,255,255,0.1)' : 'none';
+            btn.disabled = !enabled;
+            btn.style.opacity = enabled ? '1' : '0.35';
+            btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
         }
         this._updateNavButtons();
     }
@@ -591,6 +631,11 @@ export class Chart {
 
     async setResolution(resolution) {
         if (resolution === this._resolution) return;
+        if (Array.isArray(this._meta?.supportedResolutions) && !this._meta.supportedResolutions.includes(resolution)) {
+            const fallback = resolveResolutionForMeta(this._resolution, this._meta);
+            if (fallback === this._resolution) return;
+            resolution = fallback;
+        }
         if (this._symbol) this._ws.unsubscribe(this._symbol, this._resolution);
         this._resolution   = resolution;
         writeStoredResolution(resolution);
@@ -617,6 +662,11 @@ export class Chart {
                 this.invalidate('static');
                 await this._backfillLeftHistory();
             } catch (err) {
+                const fallback = getUnsupportedResolutionFallback(err);
+                if (fallback && fallback !== resolution) {
+                    await this.setResolution(fallback);
+                    return;
+                }
                 console.error('[RigoView] Failed to load candles', err);
             }
         }
