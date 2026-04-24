@@ -515,6 +515,8 @@ export class Chart {
     async _load() {
         if (!this._symbol) return;
 
+        this._updateToolbar();
+
         try {
             this._meta = await this._http.getSymbolMeta(this._symbol);
         } catch {
@@ -567,7 +569,10 @@ export class Chart {
             : null;
         for (const [r, btn] of Object.entries(this._resBtns)) {
             const active = r === this._resolution;
-            const enabled = !supported || supported.has(r);
+            // Without constraints (!supported), only treat as "all enabled" when no symbol is
+            // selected. If we have a symbol but meta is missing or omits supportedResolutions,
+            // enabling every bar size wrongly allows 1h on daily-only feeds (see resolveResolutionForMeta).
+            const enabled = !this._symbol ? !supported || supported.has(r) : supported !== null && supported.has(r);
             btn.style.color      = active ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
             btn.style.background = active ? 'rgba(255,255,255,0.1)' : 'none';
             btn.disabled = !enabled;
@@ -623,6 +628,7 @@ export class Chart {
         this._symbol      = symbol;
         this._options.onSymbolChange?.(symbol);
         this._meta        = null;
+        this._updateToolbar();
         this._hoverPos    = null;
         this._hoverCandle = null;
         this._vp.priceLocked = false;
