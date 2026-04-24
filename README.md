@@ -117,6 +117,7 @@ new RigoView(container, options)
 | `ignoreGaps` | `boolean` | compact (default) | Omit the option or pass any value except `false` to collapse gaps (weekends, missing buckets) so bars are evenly spaced. Pass **`false` exactly** to use each bar’s real open time (empty space where nothing traded). |
 | `disableTopBar` | `boolean` | `false` | When **`true`**, hides the top toolbar (symbol picker, history arrows, resolution buttons) so the chart uses the full height. Symbol and resolution can still be controlled via `setSymbol` / `setResolution`. |
 | `readOnly` | `boolean` | `false` | When **`true`**, the user cannot change the symbol (picker button is non-interactive) and the back/forward history navigation buttons are hidden. Programmatic calls to `setSymbol` / `setResolution` still work. |
+| `displayName` | `string \| null` | `null` | If provided, shown in the symbol button instead of the raw symbol id. Has no effect on data fetching — the real symbol is still used for all API calls. |
 
 `container` must be an `HTMLElement` that has a non-zero size. The chart fills it and observes size changes.
 

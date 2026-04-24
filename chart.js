@@ -75,6 +75,7 @@ export class Chart {
         this._ignoreGaps = options.ignoreGaps !== false;
         this._disableTopBar = options.disableTopBar === true;
         this._readOnly = options.readOnly === true;
+        this._displayName = options.displayName ?? null;
         /** Serializes left-history pagination so it runs without relying on wheel/pan. */
         this._backfillLeftRunning = false;
 
@@ -138,7 +139,7 @@ export class Chart {
             'color:var(--text-bright-color,#e0e8f0);font:600 13px monospace',
             'padding:3px 10px;cursor:pointer;margin-right:8px;white-space:nowrap',
         ].join(';');
-        this._symbolBtn.textContent = this._symbol ?? 'Select symbol';
+        this._symbolBtn.textContent = this._displayName ?? this._symbol ?? 'Select symbol';
         this._symbolBtn.addEventListener('click', () => { if (!this._readOnly) this._picker.open(); });
         if (this._readOnly) {
             this._symbolBtn.style.cursor = 'default';
@@ -573,7 +574,7 @@ export class Chart {
     }
 
     _updateToolbar() {
-        this._symbolBtn.textContent = this._symbol ?? 'Select symbol';
+        this._symbolBtn.textContent = this._displayName ?? this._symbol ?? 'Select symbol';
         const supported = Array.isArray(this._meta?.supportedResolutions)
             ? new Set(this._meta.supportedResolutions.filter((r) => RESOLUTION_SET.has(r)))
             : null;
