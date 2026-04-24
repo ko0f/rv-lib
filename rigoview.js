@@ -13,6 +13,8 @@ export class RigoView {
             barWidthPx:          options.barWidthPx          ?? null,
             ignoreGaps:          options.ignoreGaps          !== false,
             disableTopBar:       options.disableTopBar       === true,
+            readOnly:            options.readOnly            === true,
+            displayName:         options.displayName         ?? null,
         });
     }
 
