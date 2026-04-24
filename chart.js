@@ -74,6 +74,7 @@ export class Chart {
         this._barWidthPx = options.barWidthPx ?? null;
         this._ignoreGaps = options.ignoreGaps !== false;
         this._disableTopBar = options.disableTopBar === true;
+        this._readOnly = options.readOnly === true;
         /** Serializes left-history pagination so it runs without relying on wheel/pan. */
         this._backfillLeftRunning = false;
 
@@ -138,7 +139,11 @@ export class Chart {
             'padding:3px 10px;cursor:pointer;margin-right:8px;white-space:nowrap',
         ].join(';');
         this._symbolBtn.textContent = this._symbol ?? 'Select symbol';
-        this._symbolBtn.addEventListener('click', () => this._picker.open());
+        this._symbolBtn.addEventListener('click', () => { if (!this._readOnly) this._picker.open(); });
+        if (this._readOnly) {
+            this._symbolBtn.style.cursor = 'default';
+            this._symbolBtn.style.pointerEvents = 'none';
+        }
         this._toolbar.appendChild(this._symbolBtn);
 
         const navBtnStyle = [
@@ -165,6 +170,11 @@ export class Chart {
         this._fwdBtn.style.cssText = navBtnStyle;
         this._fwdBtn.addEventListener('click', () => void this._goForward());
         this._toolbar.appendChild(this._fwdBtn);
+
+        if (this._readOnly) {
+            this._backBtn.style.display = 'none';
+            this._fwdBtn.style.display  = 'none';
+        }
 
         // Resolution buttons
         this._resBtns = {};
