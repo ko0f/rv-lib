@@ -9,7 +9,7 @@ import { SymbolPicker } from './symbol-picker.js';
 import {
     PRICE_AXIS_W, TIME_AXIS_H,
     drawBackground, drawGrid, drawCandles, drawVolume, drawVolumeSeparator,
-    drawTimeAxis, drawPriceAxis, drawVolumeAxis, drawCrosshair, drawLiveIndicator, drawNoDataMarker,
+    drawTimeAxis, drawPriceAxis, drawCurrentPriceAxisLabel, drawVolumeAxis, drawCrosshair, drawLiveIndicator, drawNoDataMarker,
     rowIndexByRef,
 } from './renderer.js';
 
@@ -508,6 +508,7 @@ export class Chart {
 
         drawTimeAxis(ctx, vp, theme);
         drawPriceAxis(ctx, vp, theme, priceScale);
+        if (all.length) drawCurrentPriceAxisLabel(ctx, vp, theme, priceScale, all[all.length - 1]);
         drawVolumeAxis(ctx, candles, vp, theme);
         drawVolumeSeparator(ctx, vp, theme);
     }

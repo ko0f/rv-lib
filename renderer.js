@@ -437,6 +437,31 @@ export function drawPriceAxis(ctx, viewport, theme, priceScale) {
     }
 }
 
+/** Last bar’s close on the Y axis: white text on green/red to match the candle body. */
+export function drawCurrentPriceAxisLabel(ctx, viewport, theme, priceScale, candle) {
+    if (!candle || !Number.isFinite(candle.c) || !Number.isFinite(candle.o)) return;
+    const y = viewport.priceToY(candle.c);
+    const priceH = viewport.height * (1 - VOL_RATIO);
+    if (y < 0 || y > priceH) return;
+
+    const { width } = viewport;
+    const isUp   = candle.c >= candle.o;
+    const bg     = isUp ? theme.candleUp : theme.candleDown;
+    const label  = formatPrice(candle.c, priceScale);
+    const x0     = width;
+    const boxH   = 18;
+
+    ctx.save();
+    ctx.fillStyle = bg;
+    ctx.fillRect(x0 + 1, Math.round(y) - 9, PRICE_AXIS_W - 2, boxH);
+    ctx.fillStyle = '#ffffff';
+    ctx.font         = FONT;
+    ctx.textAlign    = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x0 + 5, y);
+    ctx.restore();
+}
+
 /** Volume scale labels in the right gutter (same strip as the price axis). */
 export function drawVolumeAxis(ctx, candles, viewport, theme) {
     if (!candles.length) return;
