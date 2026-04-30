@@ -119,7 +119,7 @@ new RigoView(container, options)
 | `readOnly` | `boolean` | `false` | When **`true`**, the user cannot change the symbol (picker button is non-interactive) and the back/forward history navigation buttons are hidden. Programmatic calls to `setSymbol` / `setResolution` still work. |
 | `displayName` | `string \| null` | `null` | If provided, shown in the symbol button instead of the raw symbol id. Has no effect on data fetching — the real symbol is still used for all API calls. |
 | `priceLogScale` | `boolean` | `false` | When **`true`**, the price axis starts logarithmic (`log₁₀`). Matches the LOG control in the bottom-right strip; toggling LOG still updates the chart at runtime. Requires strictly positive OHLC values to render sensibly. |
-| `priceYInverted` | `boolean` | `false` | When **`true`**, the price axis starts inverted (lower prices toward the top). Matches the INV control in the bottom-right strip; toggling INV still updates the chart at runtime. |
+| `priceYInverted` | `boolean` | `false` | When **`true`**, the price axis starts inverted (lower prices toward the top). Matches the INV control in the bottom-right strip; toggling INV still updates the chart at runtime. Candle/volume up colors follow **on-screen** open→close direction (so green/red swap vs raw `close >= open`). |
 
 `container` must be an `HTMLElement` that has a non-zero size. The chart fills it and observes size changes.
 

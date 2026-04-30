@@ -18,6 +18,14 @@ export function rowIndexByRef(allCandles) {
     return new Map(allCandles.map((row, i) => [row, i]));
 }
 
+/**
+ * Bullish (green-path) styling when close plots at or above open on screen.
+ * Matches `close >= open` when Y is normal; swaps when `viewport.priceYInverted`.
+ */
+export function candleVisualUp(viewport, c) {
+    return viewport.priceToY(c.c) <= viewport.priceToY(c.o);
+}
+
 // ---- Grid interval helpers ----
 
 function niceNumber(value) {
@@ -246,7 +254,7 @@ export function drawCandles(ctx, candles, allCandles, viewport, resolution, them
         const cx = viewport.timeToX(plotT) + cw / 2;
         if (cx < -cw || cx > viewport.width + cw) continue;
 
-        const isUp     = c.c >= c.o;
+        const isUp     = candleVisualUp(viewport, c);
         const upColor  = theme.candleUp;
         const dnColor  = theme.candleDown;
         const bodyColor = isUp ? upColor : dnColor;
@@ -344,7 +352,7 @@ export function drawVolume(ctx, candles, allCandles, viewport, resolution, theme
             ctx.fillStyle = vs > vb ? theme.volSellDom : theme.volBuyDom;
             ctx.fillRect(bx, Math.round(yTop + H_small), bwR, Math.round(H_big));
         } else {
-            ctx.fillStyle = !hasAnyPositiveVs ? theme.volNoSellSide : (c.c >= c.o ? theme.volUp : theme.volDown);
+            ctx.fillStyle = !hasAnyPositiveVs ? theme.volNoSellSide : (candleVisualUp(viewport, c) ? theme.volUp : theme.volDown);
             ctx.fillRect(bx, Math.round(Y_base - H), bwR, Math.round(H));
         }
     }
@@ -445,7 +453,7 @@ export function drawCurrentPriceAxisLabel(ctx, viewport, theme, priceScale, cand
     if (y < 0 || y > priceH) return;
 
     const { width } = viewport;
-    const isUp   = candle.c >= candle.o;
+    const isUp   = candleVisualUp(viewport, candle);
     const bg     = isUp ? theme.candleUp : theme.candleDown;
     const label  = formatPrice(candle.c, priceScale);
     const x0     = width;
