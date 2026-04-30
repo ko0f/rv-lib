@@ -11,7 +11,12 @@ const MAX_LOG10_RANGE = 24;
 const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
 
 export class Viewport {
-    constructor(width, height) {
+    /**
+     * @param {number} width
+     * @param {number} height
+     * @param {{ priceLogScale?: boolean, priceYInverted?: boolean }} [opts]
+     */
+    constructor(width, height, opts = {}) {
         this.width  = Math.max(1, width);
         this.height = Math.max(1, height);
         this.rightEdgeT  = Date.now();
@@ -20,7 +25,9 @@ export class Viewport {
         this.priceMax    = 1;
         this.priceLocked = false;
         /** When true, price ↔ Y mapping uses log10 (requires strictly positive prices). */
-        this.priceLogScale = false;
+        this.priceLogScale = opts.priceLogScale === true;
+        /** When true, low prices render toward top (Y axis flipped vs default). */
+        this.priceYInverted = opts.priceYInverted === true;
         this._listeners  = new Map();
     }
 
@@ -83,7 +90,7 @@ export class Viewport {
             const hi = Math.log10(Math.max(this.priceMax, MIN_POSITIVE_PRICE));
             if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return;
             const Lrange = hi - lo;
-            const t = 1 - clampedY / h;
+            const t = this.priceYInverted ? clampedY / h : (1 - clampedY / h);
             const anchorL = lo + t * Lrange;
             let newLrange = Lrange * factor;
             newLrange = Math.max(MIN_LOG10_RANGE, Math.min(MAX_LOG10_RANGE, newLrange));
@@ -98,7 +105,7 @@ export class Viewport {
             const oldRange = this.priceMax - this.priceMin;
             if (!Number.isFinite(oldRange) || oldRange <= 0) return;
 
-            const k = 1 - clampedY / h;
+            const k = this.priceYInverted ? clampedY / h : (1 - clampedY / h);
             const anchorPrice = this.priceMin + k * oldRange;
 
             const minRange = Math.max(MIN_PRICE_RANGE, Math.abs(anchorPrice) * 1e-8);
@@ -150,27 +157,31 @@ export class Viewport {
         if (!this.priceLogScale) {
             const range = this.priceMax - this.priceMin;
             if (!Number.isFinite(range) || range <= 0) return h / 2;
-            return h * (1 - (p - this.priceMin) / range);
+            const frac = (p - this.priceMin) / range;
+            return this.priceYInverted ? h * frac : h * (1 - frac);
         }
         const lo = Math.log10(Math.max(this.priceMin, MIN_POSITIVE_PRICE));
         const hi = Math.log10(Math.max(this.priceMax, MIN_POSITIVE_PRICE));
         const lp = Math.log10(Math.max(p, MIN_POSITIVE_PRICE));
         const Lrange = hi - lo;
         if (!Number.isFinite(Lrange) || Lrange <= 0) return h / 2;
-        return h * (1 - (lp - lo) / Lrange);
+        const frac = (lp - lo) / Lrange;
+        return this.priceYInverted ? h * frac : h * (1 - frac);
     }
 
     yToPrice(y) {
         const h = this.height * (1 - VOL_RATIO);
         if (!this.priceLogScale) {
             const range = this.priceMax - this.priceMin;
-            return this.priceMin + (1 - y / h) * range;
+            const u = this.priceYInverted ? y / h : (1 - y / h);
+            return this.priceMin + u * range;
         }
         const lo = Math.log10(Math.max(this.priceMin, MIN_POSITIVE_PRICE));
         const hi = Math.log10(Math.max(this.priceMax, MIN_POSITIVE_PRICE));
         const Lrange = hi - lo;
         if (!Number.isFinite(Lrange) || Lrange <= 0) return Math.sqrt(this.priceMin * this.priceMax);
-        const lp = lo + (1 - y / h) * Lrange;
+        const u = this.priceYInverted ? y / h : (1 - y / h);
+        const lp = lo + u * Lrange;
         return Math.pow(10, lp);
     }
 

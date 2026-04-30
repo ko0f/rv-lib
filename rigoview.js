@@ -15,6 +15,10 @@ export class RigoView {
             disableTopBar:       options.disableTopBar       === true,
             readOnly:            options.readOnly            === true,
             displayName:         options.displayName         ?? null,
+            /** Initial logarithmic price scale (LOG); requires strictly positive prices. */
+            priceLogScale:       options.priceLogScale       === true,
+            /** Initial vertical price axis direction (low at top when true). */
+            priceYInverted:      options.priceYInverted      === true,
         });
     }
 

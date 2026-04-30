@@ -118,6 +118,8 @@ new RigoView(container, options)
 | `disableTopBar` | `boolean` | `false` | When **`true`**, hides the top toolbar (symbol picker, history arrows, resolution buttons) so the chart uses the full height. Symbol and resolution can still be controlled via `setSymbol` / `setResolution`. |
 | `readOnly` | `boolean` | `false` | When **`true`**, the user cannot change the symbol (picker button is non-interactive) and the back/forward history navigation buttons are hidden. Programmatic calls to `setSymbol` / `setResolution` still work. |
 | `displayName` | `string \| null` | `null` | If provided, shown in the symbol button instead of the raw symbol id. Has no effect on data fetching — the real symbol is still used for all API calls. |
+| `priceLogScale` | `boolean` | `false` | When **`true`**, the price axis starts logarithmic (`log₁₀`). Matches the LOG control in the bottom-right strip; toggling LOG still updates the chart at runtime. Requires strictly positive OHLC values to render sensibly. |
+| `priceYInverted` | `boolean` | `false` | When **`true`**, the price axis starts inverted (lower prices toward the top). Matches the INV control in the bottom-right strip; toggling INV still updates the chart at runtime. |
 
 `container` must be an `HTMLElement` that has a non-zero size. The chart fills it and observes size changes.
 
@@ -136,6 +138,7 @@ Always call `destroy()` on unmount to release the WebSocket and event listeners.
 
 | Input | Action |
 |---|---|
+| **INV / LOG** (bottom-right) | Toggle inverted price Y-axis / logarithmic price scale |
 | Mouse wheel | Zoom around cursor |
 | Click + drag | Pan time axis |
 | Drag price axis | Lock manual price scale |

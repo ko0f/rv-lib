@@ -101,8 +101,12 @@ export class Chart {
         this._http  = new HttpClient(options.apiBase);
         this._ws    = new WsClient(options.wsBase);
         this._ds    = new DataStore(this._http);
-        this._vp    = new Viewport(this._chartW(), this._chartH());
+        this._vp    = new Viewport(this._chartW(), this._chartH(), {
+            priceLogScale:  options.priceLogScale === true,
+            priceYInverted: options.priceYInverted === true,
+        });
         this._updateLogBtnStyle();
+        this._updateInvBtnStyle();
 
         this._interaction = new Interaction(this._overlayCanvas, this._vp, this._ds);
         this._picker = new SymbolPicker(container, this._http, (id) => this.setSymbol(id));
@@ -208,32 +212,49 @@ export class Chart {
         this._canvasWrap.appendChild(this._staticCanvas);
         this._canvasWrap.appendChild(this._overlayCanvas);
 
+        const axisCornerBtn = (extra) =>
+            [
+                'position:absolute',
+                'bottom:0',
+                `height:${TIME_AXIS_H}px`,
+                'padding:0',
+                'margin:0',
+                'box-sizing:border-box',
+                'border:none',
+                'border-left:1px solid var(--widget-border-color,#252836)',
+                'display:flex',
+                'align-items:center',
+                'justify-content:center',
+                'background:transparent',
+                'color:var(--text-dim-color,#505870)',
+                'font:600 9px monospace',
+                'letter-spacing:0.03em',
+                'cursor:pointer',
+                'z-index:2',
+                ...extra,
+            ].join(';');
+
+        const btnHalfW = Math.floor(PRICE_AXIS_W / 2);
+        this._invBtn = document.createElement('button');
+        this._invBtn.type = 'button';
+        this._invBtn.textContent = 'INV';
+        this._invBtn.title = 'Invert vertical price axis';
+        this._invBtn.setAttribute('aria-label', 'Invert vertical price axis');
+        this._invBtn.style.cssText = axisCornerBtn([
+            `right:${btnHalfW}px`,
+            `width:${btnHalfW}px`,
+            'border-right:1px solid var(--widget-border-color,#252836)',
+        ]);
+        this._invBtn.addEventListener('click', () => this._toggleInvertY());
+
         this._logBtn = document.createElement('button');
         this._logBtn.type = 'button';
         this._logBtn.textContent = 'LOG';
         this._logBtn.title = 'Toggle logarithmic price scale';
-        this._logBtn.style.cssText = [
-            'position:absolute',
-            'right:0',
-            'bottom:0',
-            `width:${PRICE_AXIS_W}px`,
-            `height:${TIME_AXIS_H}px`,
-            'padding:0',
-            'margin:0',
-            'box-sizing:border-box',
-            'border:none',
-            'border-left:1px solid var(--widget-border-color,#252836)',
-            'display:flex',
-            'align-items:center',
-            'justify-content:center',
-            'background:transparent',
-            'color:var(--text-dim-color,#505870)',
-            'font:600 10px monospace',
-            'letter-spacing:0.04em',
-            'cursor:pointer',
-            'z-index:2',
-        ].join(';');
+        this._logBtn.setAttribute('aria-label', 'Toggle logarithmic price scale');
+        this._logBtn.style.cssText = axisCornerBtn([`right:0`, `width:${btnHalfW}px`]);
         this._logBtn.addEventListener('click', () => this._toggleLogScale());
+        this._canvasWrap.appendChild(this._invBtn);
         this._canvasWrap.appendChild(this._logBtn);
 
         const wrapper = document.createElement('div');
@@ -256,10 +277,25 @@ export class Chart {
         this.invalidate('static');
     }
 
+    _toggleInvertY() {
+        this._vp.priceYInverted = !this._vp.priceYInverted;
+        this._vp.priceLocked = false;
+        const candles = this._visibleCandles();
+        if (candles.length) this._vp.fitToCandles(candles);
+        this._updateInvBtnStyle();
+        this.invalidate('static');
+    }
+
     _updateLogBtnStyle() {
         const on = this._vp.priceLogScale;
         this._logBtn.style.color = on ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
         this._logBtn.style.background = on ? 'rgba(255,255,255,0.14)' : 'transparent';
+    }
+
+    _updateInvBtnStyle() {
+        const on = this._vp.priceYInverted;
+        this._invBtn.style.color = on ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
+        this._invBtn.style.background = on ? 'rgba(255,255,255,0.14)' : 'transparent';
     }
 
     _resize() {
