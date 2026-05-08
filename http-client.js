@@ -34,4 +34,12 @@ export class HttpClient {
     getCandlesBatch(queries) {
         return this._get('/candles/batch', { q: JSON.stringify(queries) });
     }
+
+    getPoints({ symbol, resolution, count, before, after, anchor }) {
+        return this._get('/points', { symbol, resolution, count, before, after, anchor });
+    }
+
+    getPointsBatch(queries) {
+        return this._get('/points/batch', { q: JSON.stringify(queries) });
+    }
 }

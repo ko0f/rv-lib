@@ -8,12 +8,12 @@ import { Interaction, getLeftPrefetchParams } from './interaction.js';
 import { SymbolPicker } from './symbol-picker.js';
 import {
     PRICE_AXIS_W, TIME_AXIS_H,
-    drawBackground, drawGrid, drawCandles, drawVolume, drawVolumeSeparator,
+    drawBackground, drawGrid, drawCandles, drawPoints, drawVolume, drawVolumeSeparator,
     drawTimeAxis, drawPriceAxis, drawCurrentPriceAxisLabel, drawVolumeAxis, drawCrosshair, drawLiveIndicator, drawNoDataMarker,
     rowIndexByRef,
 } from './renderer.js';
 
-const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
+const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3, '1mo': 30 * 86400e3, '1q': 91 * 86400e3, '1y': 365 * 86400e3 };
 const RESOLUTIONS = Object.keys(CANDLE_MS);
 const RESOLUTION_SET = new Set(RESOLUTIONS);
 const RESOLUTION_STORAGE_KEY = 'rigoview.resolution';
@@ -67,6 +67,7 @@ export class Chart {
         this._options    = options;
         this._symbol     = options.symbol     ?? null;
         this._resolution = resolveInitialResolution(options.resolution);
+        this._kind       = 'candle';
         this._meta       = null;
         this._destroyed  = false;
         this._hoverPos   = null;
@@ -74,6 +75,8 @@ export class Chart {
         this._barWidthPx = options.barWidthPx ?? null;
         this._ignoreGaps = options.ignoreGaps !== false;
         this._disableTopBar = options.disableTopBar === true;
+        /** If true, resolution bar shows current label only; no switching (UI, keys, setResolution). */
+        this._lockTimeframe = options.lockTimeframe === true;
         this._readOnly = options.readOnly === true;
         this._displayName = options.displayName ?? null;
         /** Serializes left-history pagination so it runs without relying on wheel/pan. */
@@ -108,7 +111,9 @@ export class Chart {
         this._updateLogBtnStyle();
         this._updateInvBtnStyle();
 
-        this._interaction = new Interaction(this._overlayCanvas, this._vp, this._ds);
+        this._interaction = new Interaction(this._overlayCanvas, this._vp, this._ds, {
+            lockResolution: this._lockTimeframe,
+        });
         this._picker = new SymbolPicker(container, this._http, (id) => this.setSymbol(id));
 
         this._wireEvents();
@@ -181,22 +186,10 @@ export class Chart {
             this._fwdBtn.style.display  = 'none';
         }
 
-        // Resolution buttons
-        this._resBtns = {};
-        for (const r of RESOLUTIONS) {
-            const btn = document.createElement('button');
-            btn.textContent = r;
-            btn.dataset.res = r;
-            btn.style.cssText = [
-                'background:none;border:none;border-radius:3px',
-                'padding:3px 8px;cursor:pointer;font:12px monospace',
-                'color:var(--text-dim-color,#505870)',
-                'flex-shrink:0',
-            ].join(';');
-            btn.addEventListener('click', () => this.setResolution(r));
-            this._resBtns[r] = btn;
-            this._toolbar.appendChild(btn);
-        }
+        this._resolutionArea = document.createElement('div');
+        this._resolutionArea.style.cssText = 'display:flex;align-items:center;gap:4px;flex-shrink:0';
+        this._toolbar.appendChild(this._resolutionArea);
+        this._rebuildResolutionControls();
 
         // Canvas wrapper — takes remaining height
         this._canvasWrap = document.createElement('div');
@@ -263,6 +256,52 @@ export class Chart {
         wrapper.appendChild(this._canvasWrap);
         this._container.appendChild(wrapper);
         if (this._disableTopBar) this._toolbar.style.display = 'none';
+    }
+
+    _rebuildResolutionControls() {
+        if (!this._resolutionArea) return;
+        this._resolutionArea.innerHTML = '';
+        this._resBtns = {};
+        this._resolutionLabel = null;
+        if (this._lockTimeframe) {
+            const span = document.createElement('span');
+            span.style.cssText = [
+                'padding:3px 8px;font:12px monospace',
+                'color:var(--text-bright-color,#e0e8f0)',
+                'background:rgba(255,255,255,0.1)',
+                'border-radius:3px',
+                'flex-shrink:0',
+                'user-select:none',
+            ].join(';');
+            span.setAttribute('aria-label', 'Timeframe');
+            span.textContent = this._resolution;
+            this._resolutionLabel = span;
+            this._resolutionArea.appendChild(span);
+        } else {
+            for (const r of RESOLUTIONS) {
+                const btn = document.createElement('button');
+                btn.textContent = r;
+                btn.dataset.res = r;
+                btn.style.cssText = [
+                    'background:none;border:none;border-radius:3px',
+                    'padding:3px 8px;cursor:pointer;font:12px monospace',
+                    'color:var(--text-dim-color,#505870)',
+                    'flex-shrink:0',
+                ].join(';');
+                btn.addEventListener('click', () => this.setResolution(r));
+                this._resBtns[r] = btn;
+                this._resolutionArea.appendChild(btn);
+            }
+        }
+    }
+
+    setLockTimeframe(locked) {
+        const on = locked === true;
+        if (on === this._lockTimeframe) return;
+        this._lockTimeframe = on;
+        this._interaction.setLockResolution(on);
+        this._rebuildResolutionControls();
+        this._updateToolbar();
     }
 
     _chartW() { return Math.max(1, this._canvasWrap.clientWidth  - PRICE_AXIS_W); }
@@ -390,7 +429,7 @@ export class Chart {
         this._interaction.on('prefetch-left', async ({ before }) => {
             if (!this._symbol) return;
             try {
-                await this._ds.load(this._symbol, this._resolution, { before });
+                await this._ds.load(this._symbol, this._resolution, { before }, this._kind);
                 await this._backfillLeftHistory();
             } finally {
                 this._interaction.resetPrefetch();
@@ -525,8 +564,12 @@ export class Chart {
 
         drawBackground(ctx, vp, theme);
         drawGrid(ctx, vp, theme);
-        drawVolume(ctx, candles, allCandles, vp, resolution, theme, this._ignoreGaps);
-        drawCandles(ctx, candles, allCandles, vp, resolution, theme, this._ignoreGaps);
+        if (this._kind === 'point') {
+            drawPoints(ctx, candles, allCandles, vp, resolution, theme, this._ignoreGaps);
+        } else {
+            drawVolume(ctx, candles, allCandles, vp, resolution, theme, this._ignoreGaps);
+            drawCandles(ctx, candles, allCandles, vp, resolution, theme, this._ignoreGaps);
+        }
 
         // No-data marker when panned past availability boundary
         if (avail && candles.length === 0 && this._ds.getAll(this._symbol, resolution).length > 0) {
@@ -537,16 +580,18 @@ export class Chart {
 
         // Live indicator (forming candle's close price)
         const all = this._symbol ? this._ds.getAll(this._symbol, resolution) : [];
-        if (all.length) {
+        if (all.length && this._kind !== 'point') {
             const last = all[all.length - 1];
             if (last.live) drawLiveIndicator(ctx, last.c, vp, theme);
         }
 
         drawTimeAxis(ctx, vp, theme);
         drawPriceAxis(ctx, vp, theme, priceScale);
-        if (all.length) drawCurrentPriceAxisLabel(ctx, vp, theme, priceScale, all[all.length - 1]);
-        drawVolumeAxis(ctx, candles, vp, theme);
-        drawVolumeSeparator(ctx, vp, theme);
+        if (all.length) drawCurrentPriceAxisLabel(ctx, vp, theme, priceScale, all[all.length - 1], this._kind);
+        if (this._kind !== 'point') {
+            drawVolumeAxis(ctx, candles, vp, theme);
+            drawVolumeSeparator(ctx, vp, theme);
+        }
     }
 
     _drawOverlay() {
@@ -555,7 +600,7 @@ export class Chart {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, this._overlayCanvas.width / dpr, this._overlayCanvas.height / dpr);
 
-        drawCrosshair(ctx, this._hoverPos, this._hoverCandle, this._vp, this._theme, this._meta?.priceScale, this._resolution);
+        drawCrosshair(ctx, this._hoverPos, this._hoverCandle, this._vp, this._theme, this._meta?.priceScale, this._resolution, this._kind);
     }
 
     // ---- Public commands ----
@@ -570,6 +615,7 @@ export class Chart {
         } catch {
             this._meta = null;
         }
+        this._kind = this._meta?.kind === 'point' ? 'point' : 'candle';
 
         const effectiveResolution = resolveResolutionForMeta(this._resolution, this._meta);
         if (effectiveResolution !== this._resolution) {
@@ -578,8 +624,10 @@ export class Chart {
         }
 
         // §4.4 sync contract: subscribe first, buffer WS events, then HTTP fetch
-        this._ds.startBuffering(this._symbol, this._resolution);
-        this._ws.subscribe(this._symbol, this._resolution);
+        if (this._kind !== 'point') {
+            this._ds.startBuffering(this._symbol, this._resolution);
+            this._ws.subscribe(this._symbol, this._resolution);
+        }
         this._interaction.setContext(this._symbol, this._resolution);
         this._vp.adjustZoomForResolution(this._resolution);
         if (this._barWidthPx) {
@@ -592,7 +640,7 @@ export class Chart {
             const loadParams = this._barWidthPx
                 ? { count: Math.ceil((this._vp.width / this._barWidthPx) * 1.1) }
                 : {};
-            await this._ds.load(this._symbol, this._resolution, loadParams);
+            await this._ds.load(this._symbol, this._resolution, loadParams, this._kind);
             const candles = this._ds.getAll(this._symbol, this._resolution);
             this._alignRightEdgeToLatest(candles, this._resolution);
             const visible = this._visibleCandles();
@@ -603,7 +651,7 @@ export class Chart {
         } catch (err) {
             const fallback = getUnsupportedResolutionFallback(err);
             if (fallback && fallback !== this._resolution) {
-                await this.setResolution(fallback);
+                await this.setResolution(fallback, { force: true });
                 return;
             }
             console.error('[RigoView] Failed to load candles', err);
@@ -612,6 +660,11 @@ export class Chart {
 
     _updateToolbar() {
         this._symbolBtn.textContent = this._displayName ?? this._symbol ?? 'Select symbol';
+        if (this._lockTimeframe && this._resolutionLabel) {
+            this._resolutionLabel.textContent = this._resolution;
+            this._updateNavButtons();
+            return;
+        }
         const supported = Array.isArray(this._meta?.supportedResolutions)
             ? new Set(this._meta.supportedResolutions.filter((r) => RESOLUTION_SET.has(r)))
             : null;
@@ -672,7 +725,7 @@ export class Chart {
             this._symbolHistory.push(symbol);
             this._symbolHistoryIdx = this._symbolHistory.length - 1;
         }
-        if (this._symbol) this._ws.unsubscribe(this._symbol, this._resolution);
+        if (this._symbol && this._kind !== 'point') this._ws.unsubscribe(this._symbol, this._resolution);
         this._symbol      = symbol;
         this._options.onSymbolChange?.(symbol);
         this._meta        = null;
@@ -683,14 +736,15 @@ export class Chart {
         await this._load();
     }
 
-    async setResolution(resolution) {
+    async setResolution(resolution, { force = false } = {}) {
         if (resolution === this._resolution) return;
+        if (this._lockTimeframe && !force) return;
         if (Array.isArray(this._meta?.supportedResolutions) && !this._meta.supportedResolutions.includes(resolution)) {
             const fallback = resolveResolutionForMeta(this._resolution, this._meta);
             if (fallback === this._resolution) return;
             resolution = fallback;
         }
-        if (this._symbol) this._ws.unsubscribe(this._symbol, this._resolution);
+        if (this._symbol && this._kind !== 'point') this._ws.unsubscribe(this._symbol, this._resolution);
         this._resolution   = resolution;
         writeStoredResolution(resolution);
         this._updateToolbar();
@@ -701,11 +755,13 @@ export class Chart {
         }
 
         if (this._symbol) {
-            this._ds.startBuffering(this._symbol, resolution);
-            this._ws.subscribe(this._symbol, resolution);
+            if (this._kind !== 'point') {
+                this._ds.startBuffering(this._symbol, resolution);
+                this._ws.subscribe(this._symbol, resolution);
+            }
             this._interaction.setContext(this._symbol, resolution);
             try {
-                await this._ds.load(this._symbol, resolution);
+                await this._ds.load(this._symbol, resolution, {}, this._kind);
                 const candles = this._ds.getAll(this._symbol, resolution);
                 this._alignRightEdgeToLatest(candles, resolution);
                 // Match initial _load / data:loaded: scale Y to the on-screen window so
@@ -718,7 +774,7 @@ export class Chart {
             } catch (err) {
                 const fallback = getUnsupportedResolutionFallback(err);
                 if (fallback && fallback !== resolution) {
-                    await this.setResolution(fallback);
+                    await this.setResolution(fallback, { force: true });
                     return;
                 }
                 console.error('[RigoView] Failed to load candles', err);

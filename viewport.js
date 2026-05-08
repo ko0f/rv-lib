@@ -8,7 +8,7 @@ const MIN_POSITIVE_PRICE = 1e-12;
 const MIN_LOG10_RANGE = 1e-6;
 const MAX_LOG10_RANGE = 24;
 
-const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
+const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3, '1mo': 30 * 86400e3, '1q': 91 * 86400e3, '1y': 365 * 86400e3 };
 
 export class Viewport {
     /**

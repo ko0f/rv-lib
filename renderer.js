@@ -11,7 +11,7 @@ export const TIME_AXIS_H  = 30;
 const FONT = '11px monospace';
 
 // Resolution → candle duration in ms
-const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
+const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3, '1mo': 30 * 86400e3, '1q': 91 * 86400e3, '1y': 365 * 86400e3 };
 
 /** Row index by object identity (duplicate `t` timestamps do not collapse). */
 export function rowIndexByRef(allCandles) {
@@ -292,6 +292,62 @@ export function drawCandles(ctx, candles, allCandles, viewport, resolution, them
     ctx.restore();
 }
 
+export function drawPoints(ctx, points, allPoints, viewport, resolution, theme, ignoreGaps = true) {
+    if (!points.length || !allPoints.length) return;
+    const compact = ignoreGaps !== false;
+    const candleMs = CANDLE_MS[resolution] ?? CANDLE_MS['1d'];
+    const n = allPoints.length;
+    let baseCompactT;
+    let rowIdx;
+    if (compact) {
+        baseCompactT = allPoints[n - 1].t - (n - 1) * candleMs;
+        rowIdx = rowIndexByRef(allPoints);
+    }
+
+    ctx.save();
+    ctx.strokeStyle = theme.candleUp;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    let started = false;
+    for (const p of points) {
+        let plotT;
+        if (compact) {
+            const i = rowIdx.get(p);
+            if (i === undefined) continue;
+            plotT = baseCompactT + i * candleMs;
+        } else {
+            plotT = p.t;
+        }
+        const x = viewport.timeToX(plotT);
+        const y = viewport.priceToY(p.v);
+        if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+        } else {
+            ctx.lineTo(x, y);
+        }
+    }
+    if (started) ctx.stroke();
+
+    ctx.fillStyle = theme.candleUp;
+    for (const p of points) {
+        let plotT;
+        if (compact) {
+            const i = rowIdx.get(p);
+            if (i === undefined) continue;
+            plotT = baseCompactT + i * candleMs;
+        } else {
+            plotT = p.t;
+        }
+        const x = viewport.timeToX(plotT);
+        const y = viewport.priceToY(p.v);
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
 function candleVolumeTotal(c) {
     if (c.vb != null && c.vs != null) return (Number(c.vb) || 0) + (Number(c.vs) || 0);
     return c.v ?? 0;
@@ -446,16 +502,17 @@ export function drawPriceAxis(ctx, viewport, theme, priceScale) {
 }
 
 /** Last bar’s close on the Y axis: white text on green/red to match the candle body. */
-export function drawCurrentPriceAxisLabel(ctx, viewport, theme, priceScale, candle) {
-    if (!candle || !Number.isFinite(candle.c) || !Number.isFinite(candle.o)) return;
-    const y = viewport.priceToY(candle.c);
+export function drawCurrentPriceAxisLabel(ctx, viewport, theme, priceScale, candle, kind = 'candle') {
+    const price = kind === 'point' ? candle?.v : candle?.c;
+    if (!candle || !Number.isFinite(price)) return;
+    const y = viewport.priceToY(price);
     const priceH = viewport.height * (1 - VOL_RATIO);
     if (y < 0 || y > priceH) return;
 
     const { width } = viewport;
-    const isUp   = candleVisualUp(viewport, candle);
+    const isUp = kind === 'point' ? true : candleVisualUp(viewport, candle);
     const bg     = isUp ? theme.candleUp : theme.candleDown;
-    const label  = formatPrice(candle.c, priceScale);
+    const label  = formatPrice(price, priceScale);
     const x0     = width;
     const boxH   = 18;
 
@@ -507,7 +564,7 @@ export function drawVolumeAxis(ctx, candles, viewport, theme) {
     ctx.restore();
 }
 
-export function drawCrosshair(ctx, pos, candle, viewport, theme, priceScale, resolution) {
+export function drawCrosshair(ctx, pos, candle, viewport, theme, priceScale, resolution, kind = 'candle') {
     if (!pos) return;
 
     const { x, y } = pos;
@@ -571,7 +628,7 @@ export function drawCrosshair(ctx, pos, candle, viewport, theme, priceScale, res
     }
 
     // OHLCV info panel — fixed at top-left of chart area, single row
-    if (candle) {
+    if (candle && kind === 'candle') {
         const fmt   = (v) => formatPrice(v, priceScale);
         const parts = [
             `O ${fmt(candle.o)}`,
@@ -591,6 +648,14 @@ export function drawCrosshair(ctx, pos, candle, viewport, theme, priceScale, res
             ctx.fillText(part, cx, cy);
             cx += ctx.measureText(part).width + gap;
         }
+    }
+    if (candle && kind === 'point') {
+        const part = `V ${candle.v != null ? formatPrice(candle.v, priceScale) : '—'}`;
+        ctx.font = FONT;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = theme.text;
+        ctx.fillText(part, 8, 14);
     }
 }
 

@@ -31,10 +31,12 @@ const TRACKPAD_ZOOM_SENSITIVITY = 0.009;
 const MOUSE_WHEEL_ZOOM_SENSITIVITY = 0.001;
 
 export class Interaction {
-    constructor(canvas, viewport, dataStore) {
+    constructor(canvas, viewport, dataStore, opts = {}) {
         this._canvas   = canvas;
         this._vp       = viewport;
         this._ds       = dataStore;
+        /** When true, keyboard shortcuts must not change resolution. */
+        this._lockResolution = opts.lockResolution === true;
         this._dragging = false;
         this._dragMode = null; // 'pan' | 'price-scale'
         this._lastX    = 0;
@@ -73,6 +75,11 @@ export class Interaction {
         this._symbol     = symbol;
         this._resolution = resolution;
         this._prefetching = false;
+    }
+
+    /** Update after Chart toggles lockTimeframe at runtime. */
+    setLockResolution(locked) {
+        this._lockResolution = locked === true;
     }
 
     resetPrefetch() {
@@ -183,6 +190,7 @@ export class Interaction {
         }
         const map = { '1': '1m', '5': '5m', '3': '30m', h: '1h', d: '1d', w: '1w' };
         if (map[e.key]) {
+            if (this._lockResolution) return;
             e.preventDefault();
             this._emit('resolution-change', map[e.key]);
         }

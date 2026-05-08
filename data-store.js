@@ -1,5 +1,5 @@
 // data-store.js — in-memory candle cache keyed by (symbol, resolution)
-const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3 };
+const CANDLE_MS = { '1m': 60e3, '5m': 300e3, '30m': 1800e3, '1h': 3600e3, '1d': 86400e3, '1w': 604800e3, '1mo': 30 * 86400e3, '1q': 91 * 86400e3, '1y': 365 * 86400e3 };
 
 export class DataStore extends EventTarget {
     constructor(httpClient) {
@@ -16,11 +16,11 @@ export class DataStore extends EventTarget {
 
     _entry(symbol, resolution) {
         (this._cache[symbol]                ??= {});
-        (this._cache[symbol][resolution]    ??= { candles: [], availability: null });
+        (this._cache[symbol][resolution]    ??= { rows: [], availability: null, kind: 'candle' });
         return this._cache[symbol][resolution];
     }
 
-    _unpack(columnar) {
+    _unpackCandles(columnar) {
         const { t, o, h, l, c, v, vb, vs } = columnar;
         return t.map((ts, i) => ({
             t:  ts,
@@ -28,6 +28,19 @@ export class DataStore extends EventTarget {
             v:  v[i],
             vb: vb?.[i],
             vs: vs?.[i],
+            live: false,
+        }));
+    }
+
+    _unpackPoints(columnar) {
+        const { t, v } = columnar;
+        return t.map((ts, i) => ({
+            t: ts,
+            v: v[i],
+            o: v[i],
+            h: v[i],
+            l: v[i],
+            c: v[i],
             live: false,
         }));
     }
@@ -46,34 +59,41 @@ export class DataStore extends EventTarget {
         if (buf) buf.push(event);
     }
 
-    async load(symbol, resolution, params = {}) {
+    async load(symbol, resolution, params = {}, kind = 'candle') {
         const key = this._key(symbol, resolution);
         // Deduplicate concurrent loads for the same key
         if (this._loading[key]) return this._loading[key];
-        const p = this._doLoad(symbol, resolution, params).finally(() => { delete this._loading[key]; });
+        const p = this._doLoad(symbol, resolution, params, kind).finally(() => { delete this._loading[key]; });
         this._loading[key] = p;
         return p;
     }
 
-    async _doLoad(symbol, resolution, params) {
-        const resp       = await this._http.getCandles({ symbol, resolution, count: params.count ?? 500, ...params });
-        const newCandles = this._unpack(resp.candles);
-        if (resp.live && newCandles.length) newCandles[newCandles.length - 1].live = true;
+    async _doLoad(symbol, resolution, params, kind = 'candle') {
+        const fetcher = kind === 'point' ? this._http.getPoints.bind(this._http) : this._http.getCandles.bind(this._http);
+        const resp = await fetcher({ symbol, resolution, count: params.count ?? 500, ...params });
+        const newRows = kind === 'point' ? this._unpackPoints(resp.points) : this._unpackCandles(resp.candles);
+        if (resp.live && newRows.length) newRows[newRows.length - 1].live = true;
 
         const entry = this._entry(symbol, resolution);
+        entry.kind = kind;
         entry.availability = resp.availability;
 
-        // Merge existing cache + new candles (dedupe by t, preserve newer data)
-        const map = new Map(entry.candles.map(c => [c.t, c]));
-        for (const c of newCandles) map.set(c.t, c);
-        entry.candles = [...map.values()].sort((a, b) => a.t - b.t);
+        // Merge existing cache + new rows (dedupe by t, preserve newer data)
+        const map = new Map(entry.rows.map(c => [c.t, c]));
+        for (const c of newRows) map.set(c.t, c);
+        entry.rows = [...map.values()].sort((a, b) => a.t - b.t);
+
+        if (kind === 'point') {
+            this.dispatchEvent(new CustomEvent('data:loaded', { detail: { symbol, resolution } }));
+            return entry;
+        }
 
         // §4.4 sync contract: replay buffered WS events that arrived during HTTP fetch
         const key      = this._key(symbol, resolution);
         const buffered = this._buffered[key] ?? [];
         delete this._buffered[key];
 
-        const httpTs = new Set(newCandles.map(c => c.t));
+        const httpTs = new Set(newRows.map(c => c.t));
         for (const ev of buffered) {
             if (ev.type === 'close' && !httpTs.has(ev.t)) {
                 this._mergeClose(entry, ev);
@@ -87,7 +107,7 @@ export class DataStore extends EventTarget {
     }
 
     _mergePartial(entry, tick) {
-        const candles = entry.candles;
+        const candles = entry.rows;
         const last    = candles[candles.length - 1];
         if (last?.t === tick.t) {
             Object.assign(last, { o: tick.o, h: tick.h, l: tick.l, c: tick.c, v: tick.v, live: true });
@@ -97,7 +117,7 @@ export class DataStore extends EventTarget {
     }
 
     _mergeClose(entry, candle) {
-        const candles = entry.candles;
+        const candles = entry.rows;
         const closed  = { t: candle.t, o: candle.o, h: candle.h, l: candle.l, c: candle.c, v: candle.v, live: false };
         const last    = candles[candles.length - 1];
         if (last?.t === candle.t) {
@@ -119,7 +139,7 @@ export class DataStore extends EventTarget {
     }
 
     getWindow(symbol, resolution, fromT, toT, ignoreGaps = true) {
-        const candles = this._cache[symbol]?.[resolution]?.candles ?? [];
+        const candles = this._cache[symbol]?.[resolution]?.rows ?? [];
         if (!candles.length) return [];
         const candleMs = CANDLE_MS[resolution] ?? CANDLE_MS['1h'];
         const n        = candles.length;
@@ -169,7 +189,7 @@ export class DataStore extends EventTarget {
     }
 
     getAll(symbol, resolution) {
-        return this._cache[symbol]?.[resolution]?.candles ?? [];
+        return this._cache[symbol]?.[resolution]?.rows ?? [];
     }
 
     getOldest(symbol, resolution) {
@@ -179,5 +199,9 @@ export class DataStore extends EventTarget {
 
     getAvailability(symbol, resolution) {
         return this._cache[symbol]?.[resolution]?.availability ?? null;
+    }
+
+    getKind(symbol, resolution) {
+        return this._cache[symbol]?.[resolution]?.kind ?? 'candle';
     }
 }

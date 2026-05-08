@@ -109,3 +109,35 @@ Native **WebSocket** (not Socket.IO). Messages are UTF-8 JSON text frames.
 | `{ "type": "close", "symbol", "resolution", "t", "o", "h", "l", "c", "v" }` | A bucket has **finished**; same field meanings as `partial`. |
 
 The chart subscribes over WS **before** the matching HTTP candle load so partial/close events during fetch are buffered and merged ([data-store.js](data-store.js)). Implementations may also send `{ "type": "subscribed" | "unsubscribed" | "error", ... }`; the client ignores types other than `ping`, `partial`, and `close` for data merge.
+
+## REST — `GET {apiBase}/points`
+
+Point-series endpoint for non-OHLC assets (for example macro indicators). The symbol metadata should declare `kind: "point"` in `/symbols/{id}` so rv-lib routes here.
+
+| Query | Required | Description |
+|--------|----------|-------------|
+| `symbol` | yes | Opaque symbol id for point series (for example `MACRO:mexico:USURTOT`). |
+| `resolution` | yes | One of: `1d`, `1w`, `1mo`, `1q`, `1y`. |
+| `count` | yes | Number of points to return. |
+| `before` | no | Return points strictly before this timestamp (ms). |
+| `after` | no | Return points after this timestamp (ms). |
+| `anchor` | no | Return points centered around this timestamp (ms). |
+
+**Response — success:**
+
+```json
+{
+  "ok": true,
+  "symbol": "MACRO:mexico:USURTOT",
+  "resolution": "1mo",
+  "kind": "point",
+  "points": {
+    "t": [1700000000000],
+    "v": [5.2]
+  },
+  "availability": { "earliest": 1600000000000, "latest": 1700000000000 },
+  "live": false
+}
+```
+
+For point symbols rv-lib skips WS subscribe/live handling.

@@ -20,7 +20,7 @@ export class SymbolPicker {
         box.style.cssText = [
             'background:var(--widget-bg-color,#141722)',
             'border:1px solid var(--widget-border-color,#252836)',
-            'border-radius:6px;width:380px;overflow:hidden',
+            'border-radius:6px;width:min(680px,calc(100vw - 80px));overflow:hidden',
             'box-shadow:0 8px 32px rgba(0,0,0,0.6)',
         ].join(';');
 
@@ -68,14 +68,14 @@ export class SymbolPicker {
         this._results.forEach((r, i) => {
             const el = document.createElement('div');
             el.style.cssText = [
-                'padding:9px 16px;cursor:pointer;display:flex;gap:12px;align-items:center',
+                'padding:9px 16px;cursor:pointer;display:block',
                 'font-size:13px;font-family:monospace',
                 `color:var(--text-color,#a0a8b8)`,
                 i === this._idx ? 'background:rgba(255,255,255,0.08)' : '',
             ].join(';');
             el.innerHTML = [
-                `<span style="font-weight:600;color:var(--text-bright-color,#e0e8f0);min-width:130px">${r.id}</span>`,
-                `<span>${r.description ?? ''}</span>`,
+                `<div style="font-weight:600;color:var(--text-bright-color,#e0e8f0);line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.id}</div>`,
+                `<div style="line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.description ?? ''}</div>`,
             ].join('');
             // Use mousedown so selection still works if focus/overlay handlers
             // interfere before a click event is emitted.

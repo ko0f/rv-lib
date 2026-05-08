@@ -14,6 +14,8 @@ export class RigoView {
             ignoreGaps:          options.ignoreGaps          !== false,
             disableTopBar:       options.disableTopBar       === true,
             readOnly:            options.readOnly            === true,
+            /** When true, toolbar shows only the active resolution label; switching disabled. */
+            lockTimeframe:       options.lockTimeframe       === true,
             displayName:         options.displayName         ?? null,
             /** Initial logarithmic price scale (LOG); requires strictly positive prices. */
             priceLogScale:       options.priceLogScale       === true,
@@ -26,8 +28,12 @@ export class RigoView {
         return this._chart.setSymbol(symbol);
     }
 
-    setResolution(resolution) {
-        return this._chart.setResolution(resolution);
+    setLockTimeframe(locked) {
+        return this._chart.setLockTimeframe(locked);
+    }
+
+    setResolution(resolution, opts) {
+        return this._chart.setResolution(resolution, opts);
     }
 
     jumpTo(timestamp) {
