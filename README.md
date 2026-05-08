@@ -112,11 +112,12 @@ new RigoView(container, options)
 | `apiBase` | `string` | `'/api/charts'` | REST base URL for symbol/candle queries. |
 | `wsBase` | `string` | `ws://{host}/api/charts/stream` | WebSocket URL for live updates. |
 | `symbol` | `string \| null` | `null` | Initial symbol id (e.g. `'Binance:BTCUSDT'`). |
-| `resolution` | `string` | last used or `'1h'` | Candle symbols: `1m`, `5m`, `30m`, `1h`, `1d`, `1w`. Point symbols may also expose `1mo`, `1q`, `1y` via symbol metadata. Persisted in `localStorage`. |
+| `resolution` | `string` | last used or `'1h'` | Active timeframe: any [resolution token](CHART-PROVIDER-API.md#resolution-tokens) the provider supports for the symbol (often `1m`–`1w` for candles, `1d`–`1y` for point series). Persisted in `localStorage`. |
 | `onSymbolChange` | `(id: string) => void` | `null` | Fired when the user picks a new symbol via the built-in picker. |
 | `ignoreGaps` | `boolean` | compact (default) | Omit the option or pass any value except `false` to collapse gaps (weekends, missing buckets) so bars are evenly spaced. Pass **`false` exactly** to use each bar’s real open time (empty space where nothing traded). |
 | `disableTopBar` | `boolean` | `false` | When **`true`**, hides the top toolbar (symbol picker, history arrows, resolution buttons) so the chart uses the full height. Symbol and resolution can still be controlled via `setSymbol` / `setResolution`. |
 | `readOnly` | `boolean` | `false` | When **`true`**, the user cannot change the symbol (picker button is non-interactive) and the back/forward history navigation buttons are hidden. Programmatic calls to `setSymbol` / `setResolution` still work. |
+| `lockTimeframe` | `boolean` | `false` | When **`true`**, the resolution control is always a read-only label (no switching). When omitted, RigoView still locks automatically if symbol metadata lists exactly one supported resolution (see [CHART-PROVIDER-API.md](CHART-PROVIDER-API.md)). |
 | `displayName` | `string \| null` | `null` | If provided, shown in the symbol button instead of the raw symbol id. Has no effect on data fetching — the real symbol is still used for all API calls. |
 | `priceLogScale` | `boolean` | `false` | When **`true`**, the price axis starts logarithmic (`log₁₀`). Matches the LOG control in the bottom-right strip; toggling LOG still updates the chart at runtime. Requires strictly positive OHLC values to render sensibly. |
 | `priceYInverted` | `boolean` | `false` | When **`true`**, the price axis starts inverted (lower prices toward the top). Matches the INV control in the bottom-right strip; toggling INV still updates the chart at runtime. Candle/volume up colors follow **on-screen** open→close direction (so green/red swap vs raw `close >= open`). |
@@ -128,6 +129,7 @@ new RigoView(container, options)
 ```js
 chart.setSymbol('Binance:ETHUSDT');
 chart.setResolution('5m');
+chart.setLockTimeframe(true); // force read-only resolution label for every symbol
 chart.jumpTo(timestamp);   // ms since epoch
 chart.destroy();           // close WS, remove DOM, drop listeners
 ```

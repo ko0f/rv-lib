@@ -14,7 +14,7 @@ export class RigoView {
             ignoreGaps:          options.ignoreGaps          !== false,
             disableTopBar:       options.disableTopBar       === true,
             readOnly:            options.readOnly            === true,
-            /** When true, toolbar shows only the active resolution label; switching disabled. */
+            /** When true, always lock resolution UI. When omitted, auto-locks once symbol metadata reports a single supported resolution. */
             lockTimeframe:       options.lockTimeframe       === true,
             displayName:         options.displayName         ?? null,
             /** Initial logarithmic price scale (LOG); requires strictly positive prices. */

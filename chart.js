@@ -59,6 +59,14 @@ function getUnsupportedResolutionFallback(err) {
     return fallback && RESOLUTION_SET.has(fallback) ? fallback : null;
 }
 
+/** Auto-lock when the provider advertises a single supported timeframe — no UI for switching makes sense. */
+function shouldAutoLockTimeframe(meta) {
+    const sup = Array.isArray(meta?.supportedResolutions)
+        ? meta.supportedResolutions.filter((r) => RESOLUTION_SET.has(r))
+        : null;
+    return sup !== null && sup.length === 1;
+}
+
 const RIGHT_GUTTER_PX = 20;
 
 export class Chart {
@@ -75,8 +83,10 @@ export class Chart {
         this._barWidthPx = options.barWidthPx ?? null;
         this._ignoreGaps = options.ignoreGaps !== false;
         this._disableTopBar = options.disableTopBar === true;
-        /** If true, resolution bar shows current label only; no switching (UI, keys, setResolution). */
-        this._lockTimeframe = options.lockTimeframe === true;
+        /** User option: always lock timeframe when true; when false, auto-lock still applies once meta advertises a single resolution. */
+        this._lockTimeframeExplicit = options.lockTimeframe === true;
+        /** Effective lock; recomputed from meta in `_syncLockTimeframeFromPolicy`. */
+        this._lockTimeframe = this._lockTimeframeExplicit;
         this._readOnly = options.readOnly === true;
         this._displayName = options.displayName ?? null;
         /** Serializes left-history pagination so it runs without relying on wheel/pan. */
@@ -296,10 +306,17 @@ export class Chart {
     }
 
     setLockTimeframe(locked) {
-        const on = locked === true;
-        if (on === this._lockTimeframe) return;
-        this._lockTimeframe = on;
-        this._interaction.setLockResolution(on);
+        this._lockTimeframeExplicit = locked === true;
+        this._syncLockTimeframeFromPolicy();
+    }
+
+    /** Apply `_lockTimeframeExplicit` or auto-lock rules; updates interaction + resolution toolbar. */
+    _syncLockTimeframeFromPolicy() {
+        const want = this._lockTimeframeExplicit || shouldAutoLockTimeframe(this._meta);
+        if (want !== this._lockTimeframe) {
+            this._lockTimeframe = want;
+            this._interaction.setLockResolution(want);
+        }
         this._rebuildResolutionControls();
         this._updateToolbar();
     }
@@ -622,6 +639,8 @@ export class Chart {
             this._resolution = effectiveResolution;
             writeStoredResolution(effectiveResolution);
         }
+
+        this._syncLockTimeframeFromPolicy();
 
         // §4.4 sync contract: subscribe first, buffer WS events, then HTTP fetch
         if (this._kind !== 'point') {
