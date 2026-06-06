@@ -52,7 +52,7 @@ rv-lib only recognizes these strings anywhere a **resolution** appears (query pa
 | Field | Type | Description |
 |--------|------|-------------|
 | `kind` | `string` (optional) | If exactly `"point"`, the chart loads history with `GET /points` and does **not** subscribe on the WebSocket for that symbol. Omit or use any other value for standard OHLC mode (`GET /candles` + live WS). |
-| `supportedResolutions` | `string[]` (optional) | Subset of [resolution tokens](#resolution-tokens) this symbol supports. Drives the resolution toolbar: only listed tokens are enabled. If **omitted** while a symbol is already selected, rv-lib disables every resolution button until metadata arrives (then you should return this array whenever the feed is constrained). |
+| `supportedResolutions` | `string[]` (optional) | Subset of [resolution tokens](#resolution-tokens) this symbol supports. Drives the resolution toolbar: only listed tokens are shown. If **omitted** while a symbol is already selected, rv-lib hides every resolution button until metadata arrives (then you should return this array whenever the feed is constrained). |
 | `minResolution` | `string` (optional) | Must be a known resolution token. Used when the user’s current resolution (from the widget or `localStorage`) is not in `supportedResolutions`: rv-lib switches to `minResolution` when that value is allowed, otherwise to the first entry of `supportedResolutions`. |
 | `priceScale` | `number` (optional) | Passed to the renderer for price-axis / crosshair numeric formatting when present. |
 

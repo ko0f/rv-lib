@@ -21,6 +21,7 @@ export class RigoView {
             priceLogScale:       options.priceLogScale       === true,
             /** Initial vertical price axis direction (low at top when true). */
             priceYInverted:      options.priceYInverted      === true,
+            onToolbarRight:      options.onToolbarRight      ?? null,
         });
     }
 

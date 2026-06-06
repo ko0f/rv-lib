@@ -201,6 +201,13 @@ export class Chart {
         this._toolbar.appendChild(this._resolutionArea);
         this._rebuildResolutionControls();
 
+        this._toolbarRight = document.createElement('div');
+        this._toolbarRight.style.cssText = 'display:flex;align-items:center;gap:4px;margin-left:auto;flex-shrink:0';
+        this._toolbar.appendChild(this._toolbarRight);
+        if (typeof this._options.onToolbarRight === 'function') {
+            this._options.onToolbarRight(this._toolbarRight);
+        }
+
         // Canvas wrapper — takes remaining height
         this._canvasWrap = document.createElement('div');
         this._canvasWrap.style.cssText = 'position:relative;flex:1;min-height:0;overflow:hidden';
@@ -693,11 +700,13 @@ export class Chart {
             // selected. If we have a symbol but meta is missing or omits supportedResolutions,
             // enabling every bar size wrongly allows 1h on daily-only feeds (see resolveResolutionForMeta).
             const enabled = !this._symbol ? !supported || supported.has(r) : supported !== null && supported.has(r);
+            btn.style.display = enabled ? '' : 'none';
+            if (!enabled) continue;
+            btn.disabled = false;
             btn.style.color      = active ? 'var(--text-bright-color,#e0e8f0)' : 'var(--text-dim-color,#505870)';
             btn.style.background = active ? 'rgba(255,255,255,0.1)' : 'none';
-            btn.disabled = !enabled;
-            btn.style.opacity = enabled ? '1' : '0.35';
-            btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
         }
         this._updateNavButtons();
     }
